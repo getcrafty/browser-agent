@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "browser-agent-python-sdk"
-version = "0.1.5"
+version = "1.0.0"
 description = "Python SDK for the Crafty Browser Agent"
 readme = "README.md"
 license = "MIT"
@@ -28,15 +28,14 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://getcrafty.io"
-Repository = "https://github.com/pb05/operator"
-Issues = "https://github.com/pb05/operator/issues"
+Repository = "https://github.com/getcrafty/browser-agent"
+Issues = "https://github.com/getcrafty/browser-agent/issues"
 
 [project.optional-dependencies]
 test = ["coverage[toml]>=7.6,<8"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/browser_agent"]
-artifacts = ["src/browser_agent/bin/**"]
 
 [tool.hatch.build.hooks.custom]
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import platform
@@ -24,13 +25,42 @@ def bundled_executable(system: str | None = None, machine: str | None = None) ->
     system = system or sys.platform
     suffix = ".exe" if system == "win32" else ""
     return Path(__file__).parent / "bin" / platform_key(system, machine) / f"browser-agent{suffix}"
+def bundled_manifest() -> Path:
+    return Path(__file__).parent / "cli-manifest.json"
+def verify_bundled_checksum(
+    executable: Path,
+    key: str,
+    manifest: Path | None = None,
+) -> None:
+    manifest = manifest or bundled_manifest()
+    try:
+        metadata = json.loads(manifest.read_text(encoding="utf-8"))
+        expected = metadata["platforms"][key]["sha256"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+        raise BrowserAgentError(
+            "CLI_VERSION_INCOMPATIBLE",
+            f"Bundled browser-agent checksum metadata is unavailable for {key}.",
+        ) from error
+    digest = hashlib.sha256()
+    with executable.open("rb") as binary:
+        for chunk in iter(lambda: binary.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != expected:
+        raise BrowserAgentError(
+            "CLI_VERSION_INCOMPATIBLE",
+            f"Bundled browser-agent checksum verification failed for {key}.",
+        )
 async def resolve_executable(executable: Path | None = None) -> str:
+    bundled = executable is None
     executable = executable or bundled_executable()
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise BrowserAgentError(
             "CLI_NOT_FOUND",
             f"Bundled browser-agent executable is unavailable for {platform_key()}.",
         )
+    if bundled:
+        verify_bundled_checksum(executable, platform_key())
     return str(executable)
 async def verify_executable(executable: str, timeout: float = 5) -> None:
     try:

@@ -3,7 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { resolveOptions } from "../src/options.js";
 import {
 	bundledExecutable,
@@ -48,33 +47,12 @@ test("creates private files and preserves caller-owned directories", async () =>
 
 test("normalizes platforms and resolves executable bundles", async () => {
 	assert.equal(platformKey(), `${process.platform}-${process.arch}`);
-	const syntheticPackage = path.join(
-		path.dirname(fileURLToPath(import.meta.url)),
-		"..",
-		"node_modules",
-		"crafty-browser-agent-aix-ppc64",
-	);
-	fs.mkdirSync(syntheticPackage, { recursive: true });
-	fs.writeFileSync(
-		path.join(syntheticPackage, "package.json"),
-		JSON.stringify({ name: "crafty-browser-agent-aix-ppc64" }),
-	);
-	try {
-		assert.match(
-			bundledExecutable("aix", "ppc64"),
-			/crafty-browser-agent-aix-ppc64\/bin\/browser-agent$/,
-		);
-	} finally {
-		fs.rmSync(syntheticPackage, { recursive: true, force: true });
-	}
+	assert.equal(bundledExecutable("aix", "ppc64"), "");
 	assert.match(
 		bundledExecutable("win32", "x64"),
-		/crafty-browser-agent-win32-x64\/(?:bin\/)?browser-agent\.exe$/,
+		/\/bin\/browser-agent\.exe$/,
 	);
-	assert.match(
-		bundledExecutable("linux", "arm64"),
-		/crafty-browser-agent-linux-arm64\/(?:bin\/)?browser-agent$/,
-	);
+	assert.match(bundledExecutable("linux", "arm64"), /\/bin\/browser-agent$/);
 	const executable = path.join(os.tmpdir(), `sdk-executable-${Date.now()}`);
 	fs.writeFileSync(executable, "#!/bin/sh\n", { mode: 0o700 });
 	try {
@@ -88,7 +66,7 @@ test("normalizes platforms and resolves executable bundles", async () => {
 	const absentPlatform = process.platform === "win32" ? "darwin" : "win32";
 	await assert.rejects(resolveExecutable(undefined, absentPlatform, "x64"), {
 		code: "CLI_NOT_FOUND",
-		message: /optional dependencies/,
+		message: /lifecycle scripts/,
 	});
 	await assert.rejects(resolveExecutable(undefined, "aix", "ppc64"), {
 		code: "CLI_NOT_FOUND",

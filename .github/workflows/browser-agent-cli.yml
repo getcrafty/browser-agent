@@ -233,7 +233,7 @@ jobs:
                   RAW_ASSET: ${{ matrix.raw_asset }}
               run: |
                   release_directory="$RUNNER_TEMP/browser-agent-cli-release"
-                  source="sdk/typescript-sdk/platform-packages/${PLATFORM}/bin/browser-agent${EXECUTABLE_SUFFIX}"
+                  source=".sdk-build/${PLATFORM}/browser-agent${EXECUTABLE_SUFFIX}"
                   mkdir -p "$release_directory"
                   cp "$source" "$release_directory/$RAW_ASSET"
                   chmod +x "$release_directory/$RAW_ASSET"
@@ -251,7 +251,7 @@ jobs:
                   RAW_ASSET: ${{ matrix.raw_asset }}
               run: |
                   $releaseDirectory = Join-Path $env:RUNNER_TEMP "browser-agent-cli-release"
-                  $source = "sdk/typescript-sdk/platform-packages/${env:PLATFORM}/bin/browser-agent${env:EXECUTABLE_SUFFIX}"
+                  $source = ".sdk-build/${env:PLATFORM}/browser-agent${env:EXECUTABLE_SUFFIX}"
                   New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
                   Copy-Item $source (Join-Path $releaseDirectory $env:RAW_ASSET)
                   Compress-Archive `
@@ -308,6 +308,7 @@ jobs:
               env:
                   BUILD_REF: ${{ needs.plan.outputs.build_ref }}
                   GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
                   RELEASE_EXISTS: ${{ needs.plan.outputs.release_exists }}
                   RELEASE_TAG: ${{ needs.plan.outputs.tag }}
                   RELEASE_VERSION: ${{ needs.plan.outputs.version }}
@@ -334,6 +335,7 @@ jobs:
             - name: Verify complete release
               env:
                   GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
                   RELEASE_TAG: ${{ needs.plan.outputs.tag }}
               shell: bash
               run: |
@@ -365,3 +367,374 @@ jobs:
                     throw new Error(`Release is missing assets: ${missing.join(", ")}`);
                   }
                   NODE
+
+    release-ready:
+        name: Verify complete CLI release
+        if: >-
+            ${{
+                always() &&
+                needs.plan.result == 'success' &&
+                (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+                (needs.publish-release.result == 'success' || needs.publish-release.result == 'skipped')
+            }}
+        needs:
+            - plan
+            - build
+            - publish-release
+        runs-on: ubuntu-latest
+        outputs:
+            version: ${{ needs.plan.outputs.version }}
+        steps:
+            - name: Verify release assets
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+                  RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  release_json="$(gh release view "$RELEASE_TAG" --json assets,isDraft)"
+                  RELEASE_JSON="$release_json" node --input-type=module <<'NODE'
+                  const expected = [
+                    "browser-agent-linux-arm64",
+                    "browser-agent-linux-arm64.tar.gz",
+                    "browser-agent-linux-x64",
+                    "browser-agent-linux-x64.tar.gz",
+                    "browser-agent-windows-arm64.exe",
+                    "browser-agent-windows-arm64.zip",
+                    "browser-agent-windows-x64.exe",
+                    "browser-agent-windows-x64.zip",
+                    "browser-agent-macos-arm64",
+                    "browser-agent-macos-arm64.tar.gz",
+                    "browser-agent-macos-x64",
+                    "browser-agent-macos-x64.tar.gz",
+                  ];
+                  const release = JSON.parse(process.env.RELEASE_JSON);
+                  const assets = new Set(release.assets.map((asset) => asset.name));
+                  const missing = expected.filter((name) => !assets.has(name));
+                  if (release.isDraft || missing.length > 0) {
+                    throw new Error(
+                      release.isDraft
+                        ? "Release is still a draft."
+                        : `Release is missing assets: ${missing.join(", ")}`,
+                    );
+                  }
+                  NODE
+
+    sdk-artifacts:
+        name: Build npm and PyPI packages
+        if: startsWith(github.ref, 'refs/tags/browser-agent-cli-v')
+        needs:
+            - plan
+            - release-ready
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        steps:
+            - name: Checkout release source
+              uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.ref }}
+
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: npm
+                  cache-dependency-path: sdk/typescript-sdk/package-lock.json
+
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v6
+
+            - name: Install npm SDK dependencies
+              working-directory: sdk/typescript-sdk
+              run: npm ci --ignore-scripts
+
+            - name: Download CLI release assets
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+                  RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  mkdir -p "$RUNNER_TEMP/cli-assets"
+                  gh release download "$RELEASE_TAG" \
+                    --dir "$RUNNER_TEMP/cli-assets" \
+                    --pattern "browser-agent-linux-arm64" \
+                    --pattern "browser-agent-linux-x64" \
+                    --pattern "browser-agent-windows-arm64.exe" \
+                    --pattern "browser-agent-windows-x64.exe" \
+                    --pattern "browser-agent-macos-arm64" \
+                    --pattern "browser-agent-macos-x64"
+
+            - name: Build and verify SDK artifacts
+              run: >-
+                  node scripts/package-sdk-artifacts.mjs
+                  "$RUNNER_TEMP/cli-assets"
+                  "$RUNNER_TEMP/sdk-artifacts"
+
+            - name: Upload npm package
+              uses: actions/upload-artifact@v4
+              with:
+                  name: browser-agent-npm-${{ needs.plan.outputs.version }}
+                  path: ${{ runner.temp }}/sdk-artifacts/npm/*.tgz
+                  if-no-files-found: error
+
+            - name: Upload PyPI wheels
+              uses: actions/upload-artifact@v4
+              with:
+                  name: browser-agent-pypi-${{ needs.plan.outputs.version }}
+                  path: ${{ runner.temp }}/sdk-artifacts/pypi/*.whl
+                  if-no-files-found: error
+
+    verify-sdks:
+        name: Verify SDKs (${{ matrix.platform }})
+        if: startsWith(github.ref, 'refs/tags/browser-agent-cli-v')
+        needs:
+            - release-ready
+            - sdk-artifacts
+        runs-on: ${{ matrix.runner }}
+        defaults:
+            run:
+                shell: bash
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - platform: linux-arm64
+                      runner: ubuntu-22.04-arm
+                      executable_suffix: ""
+                      wheel_tag: linux_aarch64
+                    - platform: linux-x64
+                      runner: ubuntu-22.04
+                      executable_suffix: ""
+                      wheel_tag: linux_x86_64
+                    - platform: win32-arm64
+                      runner: windows-11-arm
+                      executable_suffix: .exe
+                      wheel_tag: win_arm64
+                    - platform: win32-x64
+                      runner: windows-2025
+                      executable_suffix: .exe
+                      wheel_tag: win_amd64
+                    - platform: darwin-arm64
+                      runner: macos-15
+                      executable_suffix: ""
+                      wheel_tag: macosx_13_0_arm64
+                    - platform: darwin-x64
+                      runner: macos-15-intel
+                      executable_suffix: ""
+                      wheel_tag: macosx_13_0_x86_64
+        steps:
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.13"
+
+            - name: Download npm package
+              uses: actions/download-artifact@v4
+              with:
+                  name: browser-agent-npm-${{ needs.release-ready.outputs.version }}
+                  path: dist/npm
+
+            - name: Download Python wheels
+              uses: actions/download-artifact@v4
+              with:
+                  name: browser-agent-pypi-${{ needs.release-ready.outputs.version }}
+                  path: dist/pypi
+
+            - name: Install and test npm SDK
+              env:
+                  EXECUTABLE_SUFFIX: ${{ matrix.executable_suffix }}
+              run: |
+                  set -euo pipefail
+                  mkdir -p "$RUNNER_TEMP/browser-agent-npm-smoke"
+                  cd "$RUNNER_TEMP/browser-agent-npm-smoke"
+                  npm init --yes >/dev/null
+                  npm install "$GITHUB_WORKSPACE"/dist/npm/*.tgz --no-package-lock
+                  node --input-type=module <<'NODE'
+                  import assert from "node:assert/strict";
+                  import { spawnSync } from "node:child_process";
+                  import path from "node:path";
+                  import { createRequire } from "node:module";
+
+                  const sdk = await import("@getcrafty/browser-agent");
+                  assert.equal(typeof sdk.BrowserAgent, "function");
+                  const require = createRequire(import.meta.url);
+                  const packageRoot = path.dirname(
+                    require.resolve("@getcrafty/browser-agent/package.json"),
+                  );
+                  const executable = path.join(
+                    packageRoot,
+                    "bin",
+                    `browser-agent${process.env.EXECUTABLE_SUFFIX}`,
+                  );
+                  const result = spawnSync(executable, ["--sdk-self-test-json"], {
+                    encoding: "utf8",
+                  });
+                  assert.equal(result.status, 0, result.stderr);
+                  assert.deepEqual(JSON.parse(result.stdout), {
+                    sharp: true,
+                    tesseract: true,
+                    pdf: true,
+                    docx: true,
+                    xlsx: true,
+                  });
+                  NODE
+
+            - name: Install and test Python SDK
+              env:
+                  WHEEL_TAG: ${{ matrix.wheel_tag }}
+              run: |
+                  set -euo pipefail
+                  wheels=("$GITHUB_WORKSPACE"/dist/pypi/*-"$WHEEL_TAG".whl)
+                  if [[ "${#wheels[@]}" != "1" || ! -f "${wheels[0]}" ]]; then
+                    echo "::error::Expected one Python wheel for $WHEEL_TAG."
+                    exit 1
+                  fi
+                  python -m pip install --no-index "${wheels[0]}"
+                  python - <<'PY'
+                  import asyncio
+                  import json
+                  import subprocess
+
+                  from browser_agent.runtime import resolve_executable
+
+                  executable = asyncio.run(resolve_executable())
+                  result = subprocess.run(
+                      [executable, "--sdk-self-test-json"],
+                      capture_output=True,
+                      check=True,
+                      text=True,
+                  )
+                  assert json.loads(result.stdout) == {
+                      "sharp": True,
+                      "tesseract": True,
+                      "pdf": True,
+                      "docx": True,
+                      "xlsx": True,
+                  }
+                  PY
+
+    publish-npm:
+        name: Publish @getcrafty/browser-agent
+        if: startsWith(github.ref, 'refs/tags/browser-agent-cli-v')
+        needs:
+            - release-ready
+            - sdk-artifacts
+            - verify-sdks
+        runs-on: ubuntu-latest
+        environment: npm
+        permissions:
+            contents: read
+            id-token: write
+        steps:
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  registry-url: https://registry.npmjs.org
+
+            - name: Use an OIDC-capable npm CLI
+              run: npm install --global npm@11.5.1
+
+            - name: Download npm package
+              uses: actions/download-artifact@v4
+              with:
+                  name: browser-agent-npm-${{ needs.release-ready.outputs.version }}
+                  path: dist
+
+            - name: Check npm release
+              id: npm-release
+              env:
+                  VERSION: ${{ needs.release-ready.outputs.version }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  set +e
+                  output="$(npm view "@getcrafty/browser-agent@$VERSION" version 2>&1)"
+                  status="$?"
+                  set -e
+                  if [[ "$status" == "0" ]]; then
+                    echo "publish=false" >> "$GITHUB_OUTPUT"
+                    echo "@getcrafty/browser-agent@$VERSION already exists; skipping."
+                  elif grep -q "E404" <<<"$output"; then
+                    echo "publish=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "$output" >&2
+                    exit "$status"
+                  fi
+
+            - name: Publish npm package
+              if: steps.npm-release.outputs.publish == 'true'
+              run: npm publish dist/*.tgz --access public
+
+    publish-pypi:
+        name: Publish browser-agent-python-sdk
+        if: startsWith(github.ref, 'refs/tags/browser-agent-cli-v')
+        needs:
+            - release-ready
+            - sdk-artifacts
+            - verify-sdks
+        runs-on: ubuntu-latest
+        environment:
+            name: pypi
+            url: https://pypi.org/project/browser-agent-python-sdk/
+        permissions:
+            contents: read
+            id-token: write
+        steps:
+            - name: Download PyPI wheels
+              uses: actions/download-artifact@v4
+              with:
+                  name: browser-agent-pypi-${{ needs.release-ready.outputs.version }}
+                  path: dist
+
+            - name: Check PyPI release
+              id: pypi-release
+              env:
+                  VERSION: ${{ needs.release-ready.outputs.version }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  python3 - <<'PY'
+                  import json
+                  import os
+                  import pathlib
+                  import urllib.error
+                  import urllib.request
+
+                  version = os.environ["VERSION"]
+                  expected = sorted(path.name for path in pathlib.Path("dist").glob("*.whl"))
+                  url = f"https://pypi.org/pypi/browser-agent-python-sdk/{version}/json"
+                  try:
+                      with urllib.request.urlopen(url) as response:
+                          release = json.load(response)
+                  except urllib.error.HTTPError as error:
+                      if error.code != 404:
+                          raise
+                      publish = True
+                  else:
+                      actual = sorted(item["filename"] for item in release["urls"])
+                      if actual != expected:
+                          raise RuntimeError(
+                              f"PyPI {version} is incomplete or conflicting: "
+                              f"expected {expected}, found {actual}"
+                          )
+                      publish = False
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                      output.write(f"publish={str(publish).lower()}\n")
+                  PY
+
+            - name: Publish Python wheels
+              if: steps.pypi-release.outputs.publish == 'true'
+              uses: pypa/gh-action-pypi-publish@release/v1
+              with:
+                  packages-dir: dist

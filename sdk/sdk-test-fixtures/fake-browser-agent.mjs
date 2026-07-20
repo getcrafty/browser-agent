@@ -18,6 +18,19 @@ if (process.argv.includes("--version-json")) {
 	process.exit(0);
 }
 
+if (process.argv.includes("--sdk-self-test-json")) {
+	process.stdout.write(
+		`${JSON.stringify({
+			sharp: true,
+			tesseract: true,
+			pdf: true,
+			docx: true,
+			xlsx: true,
+		})}\n`,
+	);
+	process.exit(0);
+}
+
 const configPath = process.argv.find(
 	(argument) =>
 		argument !== process.argv[0] &&

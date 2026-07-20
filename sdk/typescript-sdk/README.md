@@ -1,12 +1,10 @@
 # Browser Agent TypeScript SDK
 
-Dependency-free TypeScript wrapper for the bundled Crafty Browser Agent
-executable.
+Dependency-free TypeScript wrapper for the Crafty Browser Agent executable.
 
-The installer selects an exact-version platform package for macOS, Linux
-(glibc), or Windows on ARM64 or x64. Do not install with
-`--omit=optional`, because the optional package contains the executable and
-its native runtime assets.
+The installer downloads the exact-version executable for macOS, Linux (glibc),
+or Windows on ARM64 or x64 from the matching GitHub Release and verifies its
+SHA-256 checksum. npm lifecycle scripts must be enabled during installation.
 
 ## Getting started
 
@@ -14,11 +12,11 @@ Requires Node.js 20 or newer, Chrome or a compatible Chromium installation,
 and a provider API key unless using `vllm`.
 
 ```sh
-npm install crafty-browser-agent
+npm install @getcrafty/browser-agent
 ```
 
 ```ts
-import { BrowserAgent, type BrowserAgentTask } from "crafty-browser-agent";
+import { BrowserAgent, type BrowserAgentTask } from "@getcrafty/browser-agent";
 
 const agent = new BrowserAgent({
 	provider: "openai",

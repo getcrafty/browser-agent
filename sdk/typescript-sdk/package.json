@@ -1,6 +1,6 @@
 {
-	"name": "crafty-browser-agent",
-	"version": "0.1.5",
+	"name": "@getcrafty/browser-agent",
+	"version": "1.0.0",
 	"description": "TypeScript SDK for the Crafty Browser Agent",
 	"keywords": [
 		"ai",
@@ -12,6 +12,7 @@
 	"author": "Crafty",
 	"license": "MIT",
 	"homepage": "https://getcrafty.io",
+	"repository": "https://github.com/getcrafty/browser-agent",
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -24,17 +25,11 @@
 	},
 	"files": [
 		"dist",
+		"cli-manifest.json",
+		"scripts/install-cli.mjs",
 		"LICENSE.md",
 		"README.md"
 	],
-	"optionalDependencies": {
-		"crafty-browser-agent-darwin-arm64": "0.1.4",
-		"crafty-browser-agent-darwin-x64": "0.1.4",
-		"crafty-browser-agent-linux-arm64": "0.1.4",
-		"crafty-browser-agent-linux-x64": "0.1.4",
-		"crafty-browser-agent-win32-arm64": "0.1.4",
-		"crafty-browser-agent-win32-x64": "0.1.4"
-	},
 	"publishConfig": {
 		"access": "public",
 		"registry": "https://registry.npmjs.org/"
@@ -44,8 +39,8 @@
 	},
 	"scripts": {
 		"build": "tsc",
-		"check:binary": "node ../../scripts/check-sdk-binary.mjs typescript",
-		"prepack": "npm run build && npm run check:binary",
+		"postinstall": "node scripts/install-cli.mjs",
+		"prepack": "npm run build && node ../../scripts/validate-cli-manifest.mjs",
 		"test": "npm run build && npm run test:types && npm run test:coverage",
 		"test:types": "tsc --noEmit --strict --target ES2022 --module ES2022 --moduleResolution bundler tests/types.types.ts",
 		"test:unit": "tsx --test tests/*.test.ts",

@@ -1,11 +1,12 @@
 # Browser Agent Python SDK
 
-Dependency-free asynchronous Python wrapper for the bundled Crafty Browser
-Agent executable.
+Dependency-free asynchronous Python wrapper for the Crafty Browser Agent
+executable.
 
 The SDK is distributed as platform wheels for macOS, Linux (glibc), and
-Windows on ARM64 or x64. Each wheel contains the executable and its native
-runtime assets; source distributions are intentionally unsupported.
+Windows on ARM64 or x64. Each wheel contains the matching executable from the
+same-version GitHub Release, verified by SHA-256, plus its native runtime
+assets; source distributions are intentionally unsupported.
 
 ## Getting started
 

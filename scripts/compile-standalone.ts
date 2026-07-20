@@ -50,7 +50,28 @@ const languageBase64 = fs
 		),
 	)
 	.toString("base64");
+const tesseractWorkerEntrypoint = path.join(
+	root,
+	"node_modules",
+	"tesseract.js",
+	"src",
+	"worker-script",
+	"node",
+	"index.js",
+);
 const wrapper = path.join(path.dirname(outfile), "standalone-entry.ts");
+const tesseractWorkerWrapper = path.join(
+	path.dirname(outfile),
+	"standalone-tesseract-worker.ts",
+);
+const tesseractWorkerSpecifier = `./${path
+	.relative(root, tesseractWorkerWrapper)
+	.split(path.sep)
+	.join(path.posix.sep)}`;
+fs.writeFileSync(
+	tesseractWorkerWrapper,
+	`await import(${JSON.stringify(tesseractWorkerEntrypoint)});\n`,
+);
 fs.writeFileSync(
 	wrapper,
 	`
@@ -116,8 +137,7 @@ if (!process.argv.includes("--version-json")) {
 	globalThis.__browserAgentTesseractOptions = {
 		cachePath: langPath,
 		gzip: true,
-		workerPath:
-			"/$bunfs/root/node_modules/tesseract.js/src/worker-script/node/index.js",
+		workerPath: ${JSON.stringify(tesseractWorkerSpecifier)},
 		langPath,
 	};
 	if (process.platform !== "win32") {
@@ -196,19 +216,7 @@ module.exports = require(addon);
 `;
 
 const result = await Bun.build({
-	entrypoints: [
-		wrapper,
-		canvasEntrypoint,
-		path.join(
-			root,
-			"node_modules",
-			"tesseract.js",
-			"src",
-			"worker-script",
-			"node",
-			"index.js",
-		),
-	],
+	entrypoints: [wrapper, canvasEntrypoint, tesseractWorkerWrapper],
 	compile: { outfile },
 	minify: true,
 	plugins: [

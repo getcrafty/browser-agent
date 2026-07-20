@@ -3,7 +3,6 @@ import { constants } from "node:fs";
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { BrowserAgentError } from "./errors.js";
@@ -11,15 +10,15 @@ import type { ResolvedOptions } from "./options.js";
 import type { BrowserAgentTask } from "./types.js";
 
 const execute = promisify(execFile);
-const require = createRequire(import.meta.url);
-const PLATFORM_PACKAGES = {
-	"darwin-arm64": "crafty-browser-agent-darwin-arm64",
-	"darwin-x64": "crafty-browser-agent-darwin-x64",
-	"linux-arm64": "crafty-browser-agent-linux-arm64",
-	"linux-x64": "crafty-browser-agent-linux-x64",
-	"win32-arm64": "crafty-browser-agent-win32-arm64",
-	"win32-x64": "crafty-browser-agent-win32-x64",
-} as const;
+const PACKAGE_ROOT = fileURLToPath(new URL("../", import.meta.url));
+const SUPPORTED_PLATFORMS = new Set([
+	"darwin-arm64",
+	"darwin-x64",
+	"linux-arm64",
+	"linux-x64",
+	"win32-arm64",
+	"win32-x64",
+]);
 
 export const platformKey = (
 	platform: NodeJS.Platform = process.platform,
@@ -31,26 +30,8 @@ export function bundledExecutable(
 ): string {
 	const suffix = platform === "win32" ? ".exe" : "";
 	const key = platformKey(platform, architecture);
-	const packageName =
-		PLATFORM_PACKAGES[key as keyof typeof PLATFORM_PACKAGES] ??
-		`crafty-browser-agent-${key}`;
-	try {
-		const manifest = require.resolve(`${packageName}/package.json`);
-		return path.join(
-			path.dirname(manifest),
-			"bin",
-			`browser-agent${suffix}`,
-		);
-	} catch {
-		const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-		return path.resolve(
-			packageRoot,
-			"..",
-			packageName,
-			"bin",
-			`browser-agent${suffix}`,
-		);
-	}
+	if (!SUPPORTED_PLATFORMS.has(key)) return "";
+	return path.join(PACKAGE_ROOT, "bin", `browser-agent${suffix}`);
 }
 export async function resolveExecutable(
 	executable?: string,
@@ -64,12 +45,10 @@ export async function resolveExecutable(
 	} catch {
 		if (!executable) {
 			const key = platformKey(platform, architecture);
-			const packageName =
-				PLATFORM_PACKAGES[key as keyof typeof PLATFORM_PACKAGES];
 			throw new BrowserAgentError(
 				"CLI_NOT_FOUND",
-				packageName
-					? `Platform package '${packageName}' is unavailable. Reinstall 'crafty-browser-agent' without omitting optional dependencies.`
+				SUPPORTED_PLATFORMS.has(key)
+					? "The Browser Agent CLI was not installed. Reinstall '@getcrafty/browser-agent' with npm lifecycle scripts enabled."
 					: `Crafty Browser Agent does not provide an executable for ${key}.`,
 			);
 		}

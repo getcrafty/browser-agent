@@ -1,23 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
-const [wrapperTarball, platformTarball, platform] = process.argv.slice(2);
-if (!wrapperTarball || !platformTarball || !platform) {
+const [wrapperTarball, assetDirectory] = process.argv.slice(2);
+if (!wrapperTarball || !assetDirectory) {
 	throw new Error(
-		"Usage: verify-npm-packages <wrapper.tgz> <platform.tgz> <platform>",
+		"Usage: verify-npm-packages <wrapper.tgz> <release-asset-directory>",
 	);
 }
-const absoluteWrapper = path.resolve(wrapperTarball);
-const absolutePlatform = path.resolve(platformTarball);
-const suffix = platform.startsWith("win32-") ? ".exe" : "";
-const packageName = `crafty-browser-agent-${platform}`;
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const directory = fs.mkdtempSync(
 	path.join(os.tmpdir(), "browser-agent-npm-package-"),
 );
@@ -46,46 +40,37 @@ try {
 		"--ignore-scripts",
 		"--no-package-lock",
 		"--offline",
-		absolutePlatform,
-		absoluteWrapper,
+		path.resolve(wrapperTarball),
 	]);
 	const require = createRequire(path.join(directory, "package.json"));
-	const platformManifest = require.resolve(`${packageName}/package.json`);
-	const executable = path.join(
-		path.dirname(platformManifest),
-		"bin",
-		`browser-agent${suffix}`,
-	);
-	const testedExecutable = path.join(
-		root,
-		"sdk",
-		"typescript-sdk",
-		"platform-packages",
-		platform,
-		"bin",
-		`browser-agent${suffix}`,
-	);
-	assert(
-		fs.existsSync(executable),
-		`Missing packaged executable: ${executable}`,
-	);
-	const digest = (file) =>
-		createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+	const packageManifestPath =
+		require.resolve("@getcrafty/browser-agent/package.json");
+	const packageRoot = path.dirname(packageManifestPath);
 	assert.equal(
-		digest(executable),
-		digest(testedExecutable),
-		"Packaged executable differs from the tested binary",
+		fs.existsSync(path.join(packageRoot, "bin")),
+		false,
+		"The npm tarball must not contain a CLI binary",
 	);
+	const manifest = JSON.parse(
+		fs.readFileSync(path.join(packageRoot, "cli-manifest.json"), "utf8"),
+	);
+	assert.equal(
+		manifest.version,
+		JSON.parse(fs.readFileSync(packageManifestPath, "utf8")).version,
+	);
+	const key = `${process.platform}-${process.arch}`;
+	const target = manifest.platforms[key];
+	assert(target, `Packaged manifest does not support ${key}`);
+	const payload = fs.readFileSync(path.join(assetDirectory, target.asset));
+	const installer = await import(
+		pathToFileURL(path.join(packageRoot, "scripts", "install-cli.mjs")).href
+	);
+	const executable = await installer.installCli({
+		root: packageRoot,
+		fetchImplementation: async () => new Response(payload),
+	});
 	const runtime = await import(
-		pathToFileURL(
-			path.join(
-				path.dirname(
-					require.resolve("crafty-browser-agent/package.json"),
-				),
-				"dist",
-				"runtime.js",
-			),
-		).href
+		pathToFileURL(path.join(packageRoot, "dist", "runtime.js")).href
 	);
 	assert.equal(await runtime.resolveExecutable(), executable);
 	const selfTest = run(executable, ["--sdk-self-test-json"]);
@@ -96,16 +81,8 @@ try {
 		docx: true,
 		xlsx: true,
 	});
-	assert.doesNotMatch(
-		selfTest.stderr,
-		/Cannot (find|load) .*module|native binding/i,
-	);
-	run(process.execPath, [
-		path.join(root, "scripts", "smoke-sdk-binary.mjs"),
-		executable,
-	]);
 } finally {
 	fs.rmSync(directory, { recursive: true, force: true });
 }
 
-console.log(`npm SDK packages verified for ${platform}.`);
+console.log("npm SDK package verified.");

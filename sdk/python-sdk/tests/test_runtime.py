@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -10,9 +11,11 @@ from unittest.mock import patch
 from browser_agent import BrowserAgentTask
 from browser_agent.runtime import (
     bundled_executable,
+    bundled_manifest,
     create_runtime_files,
     platform_key,
     resolve_executable,
+    verify_bundled_checksum,
     verify_executable,
 )
 from tests.helpers import FAKE_EXECUTABLE, fake_environment
@@ -105,7 +108,12 @@ class ExecutableTests(unittest.IsolatedAsyncioTestCase):
             Path(__file__).parents[1] / "src" / "browser_agent" / "bin"
             / platform_key() / "browser-agent"
         )
-        self.assertEqual(await resolve_executable(), str(expected))
+        self.assertEqual(bundled_executable(), expected)
+        self.assertTrue(str(bundled_manifest()).endswith("cli-manifest.json"))
+        self.assertEqual(
+            await resolve_executable(Path(FAKE_EXECUTABLE)),
+            FAKE_EXECUTABLE,
+        )
         with self.assertRaisesRegex(Exception, "unavailable"):
             await resolve_executable(Path("/definitely/missing"))
         with fake_environment("success"):
@@ -126,3 +134,27 @@ class ExecutableTests(unittest.IsolatedAsyncioTestCase):
             sleeper.chmod(0o700)
             with self.assertRaisesRegex(Exception, "timed out"):
                 await verify_executable(str(sleeper), 0.005)
+
+    def test_verifies_bundled_checksum(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="py-checksum-") as directory:
+            root = Path(directory)
+            executable = root / "browser-agent"
+            executable.write_bytes(b"binary")
+            digest = hashlib.sha256(b"binary").hexdigest()
+            manifest = root / "cli-manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "platforms": {
+                            "linux-x64": {
+                                "sha256": digest,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verify_bundled_checksum(executable, "linux-x64", manifest)
+            executable.write_bytes(b"changed")
+            with self.assertRaisesRegex(Exception, "verification failed"):
+                verify_bundled_checksum(executable, "linux-x64", manifest)

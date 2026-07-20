@@ -10,15 +10,10 @@ const platform = `${process.platform}-${process.arch}`;
 const suffix = process.platform === "win32" ? ".exe" : "";
 const executable = process.argv[2]
 	? path.resolve(process.argv[2])
-	: path.join(
-			root,
-			"sdk",
-			"typescript-sdk",
-			"platform-packages",
-			platform,
-			"bin",
-			`browser-agent${suffix}`,
-		);
+	: path.join(root, ".sdk-build", platform, `browser-agent${suffix}`);
+const packageVersion = JSON.parse(
+	fs.readFileSync(path.join(root, "package.json"), "utf8"),
+).version;
 const isolatedDirectory = fs.mkdtempSync(
 	path.join(os.tmpdir(), "browser-agent-standalone-smoke-"),
 );
@@ -27,6 +22,7 @@ const environment = {
 	PATH: process.platform === "win32" ? "" : "/usr/bin:/bin",
 	OPENAI_API_KEY: "smoke-test",
 };
+const commandTimeout = 120_000;
 const nativeTempPrefixes = ["browser-agent-canvas-", "browser-agent-sharp-"];
 const nativeTempDirectoriesBefore = new Map(
 	nativeTempPrefixes.map((prefix) => [
@@ -45,15 +41,20 @@ function run(arguments_, input) {
 		env: environment,
 		encoding: "utf8",
 		input,
+		timeout: commandTimeout,
 	});
-	assert.equal(result.error, undefined);
+	assert.equal(
+		result.error,
+		undefined,
+		`Standalone SDK command timed out or failed to start: ${arguments_.join(" ")}`,
+	);
 	return result;
 }
 
 const version = run(["--version-json"]);
 assert.equal(version.status, 0);
 assert.deepEqual(JSON.parse(version.stdout), {
-	version: "1.0.0",
+	version: packageVersion,
 	rpcProtocolVersion: 1,
 });
 const after = fs

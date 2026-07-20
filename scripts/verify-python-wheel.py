@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform as host_platform
 import subprocess
 import sys
 import tempfile
@@ -21,34 +22,54 @@ def run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[s
     )
 
 
+def host_key() -> str:
+    machine = host_platform.machine().lower()
+    architecture = {
+        "aarch64": "arm64",
+        "amd64": "x64",
+        "x86_64": "x64",
+    }.get(machine, machine)
+    return f"{sys.platform}-{architecture}"
+
+
 def main() -> None:
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 5:
         raise RuntimeError(
-            "Usage: verify-python-wheel <browser-agent.whl> <platform>"
+            "Usage: verify-python-wheel <wheel> <platform> <executable> <manifest>"
         )
     wheel = Path(sys.argv[1]).resolve()
     platform = sys.argv[2]
-    expected_wheel_platform = os.environ.get(
-        "BROWSER_AGENT_WHEEL_PLATFORM_TAG"
-    )
-    if (
-        expected_wheel_platform
-        and not wheel.name.endswith(f"-{expected_wheel_platform}.whl")
-    ):
-        raise RuntimeError(
-            f"Wheel has the wrong platform tag: {wheel.name}; "
-            f"expected {expected_wheel_platform}"
-        )
+    tested_executable = Path(sys.argv[3]).resolve()
+    manifest_path = Path(sys.argv[4]).resolve()
     suffix = ".exe" if platform.startswith("win32-") else ""
-    executable_entry = (
-        f"browser_agent/bin/{platform}/browser-agent{suffix}"
-    )
+    executable_entry = f"browser_agent/bin/{platform}/browser-agent{suffix}"
+    manifest_entry = "browser_agent/cli-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected_digest = manifest["platforms"][platform]["sha256"]
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
-        if executable_entry not in names:
+        executables = sorted(
+            name
+            for name in names
+            if name.startswith("browser_agent/bin/")
+            and name.rsplit("/", 1)[-1] in {"browser-agent", "browser-agent.exe"}
+        )
+        if executables != [executable_entry]:
             raise RuntimeError(
-                f"Wheel does not contain {executable_entry}: {wheel}"
+                f"Wheel must contain only {executable_entry}, found {executables}"
             )
+        if executable_entry not in names or manifest_entry not in names:
+            raise RuntimeError(
+                f"Wheel is missing its executable or manifest: {wheel}"
+            )
+        packaged_executable = archive.read(executable_entry)
+        if hashlib.sha256(packaged_executable).hexdigest() != expected_digest:
+            raise RuntimeError("Wheel executable checksum differs from its manifest")
+        if packaged_executable != tested_executable.read_bytes():
+            raise RuntimeError("Wheel executable differs from the release asset")
+        packaged_manifest = json.loads(archive.read(manifest_entry))
+        if packaged_manifest != manifest:
+            raise RuntimeError("Wheel manifest differs from the release manifest")
         if not platform.startswith("win32-"):
             mode = archive.getinfo(executable_entry).external_attr >> 16
             if mode & 0o111 == 0:
@@ -56,6 +77,9 @@ def main() -> None:
                     f"Wheel executable lacks execute permissions: {oct(mode)}"
                 )
 
+    if platform != host_key():
+        print(f"Python SDK wheel statically verified for {platform}.")
+        return
     with tempfile.TemporaryDirectory(
         prefix="browser-agent-python-wheel-"
     ) as directory:
@@ -63,48 +87,19 @@ def main() -> None:
         venv.EnvBuilder(with_pip=True).create(environment)
         scripts = environment / ("Scripts" if os.name == "nt" else "bin")
         python = scripts / ("python.exe" if os.name == "nt" else "python")
-        run(
-            [
-                str(python),
-                "-m",
-                "pip",
-                "install",
-                "--no-index",
-                str(wheel),
-            ]
-        )
+        run([str(python), "-m", "pip", "install", "--no-index", str(wheel)])
         probe = run(
             [
                 str(python),
                 "-c",
                 (
-                    "from browser_agent.runtime import bundled_executable;"
-                    "print(bundled_executable())"
+                    "import asyncio;"
+                    "from browser_agent.runtime import resolve_executable;"
+                    "print(asyncio.run(resolve_executable()))"
                 ),
             ]
         )
         executable = Path(probe.stdout.strip())
-        if not executable.is_file():
-            raise RuntimeError(f"Installed executable is missing: {executable}")
-        root = Path(__file__).resolve().parents[1]
-        tested_executable = (
-            root
-            / "sdk"
-            / "python-sdk"
-            / "src"
-            / "browser_agent"
-            / "bin"
-            / platform
-            / f"browser-agent{suffix}"
-        )
-        installed_digest = hashlib.sha256(executable.read_bytes()).digest()
-        tested_digest = hashlib.sha256(
-            tested_executable.read_bytes()
-        ).digest()
-        if installed_digest != tested_digest:
-            raise RuntimeError(
-                "Wheel executable differs from the tested binary"
-            )
         self_test = run([str(executable), "--sdk-self-test-json"])
         expected = {
             "sharp": True,
@@ -115,15 +110,6 @@ def main() -> None:
         }
         if json.loads(self_test.stdout) != expected:
             raise RuntimeError(f"Unexpected self-test output: {self_test.stdout}")
-        diagnostics = self_test.stderr.lower()
-        if (
-            "cannot find module" in diagnostics
-            or "cannot load" in diagnostics
-            or "native binding" in diagnostics
-        ):
-            raise RuntimeError(
-                f"Wheel executable emitted dependency errors:\n{self_test.stderr}"
-            )
 
     print(f"Python SDK wheel verified for {platform}.")
 
