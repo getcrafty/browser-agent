@@ -58,7 +58,16 @@ if (!process.argv.includes("--version-json")) {
 	const fs = require("node:fs");
 	const os = require("node:os");
 	const path = require("node:path");
-	const directory = fs.mkdtempSync(path.join(os.tmpdir(), "browser-agent-canvas-"));
+	const nativeDirectoryPrefix = "browser-agent-canvas-";
+	if (process.platform === "win32") {
+		for (const name of fs.readdirSync(os.tmpdir())) {
+			if (!name.startsWith(nativeDirectoryPrefix)) continue;
+			try {
+				fs.rmSync(path.join(os.tmpdir(), name), { recursive: true, force: true });
+			} catch {}
+		}
+	}
+	const directory = fs.mkdtempSync(path.join(os.tmpdir(), nativeDirectoryPrefix));
 	const addon = path.join(directory, ${JSON.stringify(path.basename(canvasNative))});
 	fs.writeFileSync(addon, Buffer.from(${JSON.stringify(canvasBase64)}, "base64"));
 	const canvasSidecars = ${JSON.stringify(embeddedCanvasSidecars)};
@@ -111,7 +120,9 @@ if (!process.argv.includes("--version-json")) {
 			"/$bunfs/root/node_modules/tesseract.js/src/worker-script/node/index.js",
 		langPath,
 	};
-	process.once("exit", () => fs.rmSync(directory, { recursive: true, force: true }));
+	if (process.platform !== "win32") {
+		process.once("exit", () => fs.rmSync(directory, { recursive: true, force: true }));
+	}
 }
 await import(${JSON.stringify(entrypoint)});
 `,
@@ -151,7 +162,16 @@ const embeddedSharp = `
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "browser-agent-sharp-"));
+const nativeDirectoryPrefix = "browser-agent-sharp-";
+if (process.platform === "win32") {
+	for (const name of fs.readdirSync(os.tmpdir())) {
+		if (!name.startsWith(nativeDirectoryPrefix)) continue;
+		try {
+			fs.rmSync(path.join(os.tmpdir(), name), { recursive: true, force: true });
+		} catch {}
+	}
+}
+const root = fs.mkdtempSync(path.join(os.tmpdir(), nativeDirectoryPrefix));
 const addonDirectory = path.join(root, "node_modules/@img/sharp-${platform}/lib");
 const libraryDirectory = path.join(root, ${JSON.stringify(
 	isWindows
@@ -169,7 +189,9 @@ for (const library of libraries) {
 		Buffer.from(library.base64, "base64"),
 	);
 }
-process.once("exit", () => fs.rmSync(root, { recursive: true, force: true }));
+if (process.platform !== "win32") {
+	process.once("exit", () => fs.rmSync(root, { recursive: true, force: true }));
+}
 module.exports = require(addon);
 `;
 
@@ -194,7 +216,9 @@ const result = await Bun.build({
 			name: "use-embedded-canvas",
 			setup(build) {
 				build.onLoad(
-					{ filter: /pdfjs-dist\/legacy\/build\/pdf\.mjs$/ },
+					{
+						filter: /pdfjs-dist[\\/]legacy[\\/]build[\\/]pdf\.mjs$/,
+					},
 					async ({ path: filename }) => {
 						let source = await Bun.file(filename).text();
 						const setupStart = source.indexOf(
@@ -229,10 +253,13 @@ const result = await Bun.build({
 		{
 			name: "embed-sharp-addon",
 			setup(build) {
-				build.onLoad({ filter: /sharp\/lib\/sharp\.js$/ }, () => ({
-					contents: embeddedSharp,
-					loader: "js",
-				}));
+				build.onLoad(
+					{ filter: /sharp[\\/]lib[\\/]sharp\.js$/ },
+					() => ({
+						contents: embeddedSharp,
+						loader: "js",
+					}),
+				);
 			},
 		},
 	],

@@ -1,7 +1,6 @@
 name: Browser Agent CLI
 
 on:
-    pull_request:
     push:
         branches:
             - "**"
@@ -12,51 +11,192 @@ on:
 permissions:
     contents: read
 
+concurrency:
+    group: browser-agent-cli-release
+    cancel-in-progress: false
+
 jobs:
+    plan:
+        name: Plan missing platform builds
+        runs-on: ubuntu-latest
+        outputs:
+            build_ref: ${{ steps.plan.outputs.build_ref }}
+            has_missing: ${{ steps.plan.outputs.has_missing }}
+            matrix: ${{ steps.plan.outputs.matrix }}
+            release_exists: ${{ steps.plan.outputs.release_exists }}
+            tag: ${{ steps.plan.outputs.tag }}
+            tag_exists: ${{ steps.plan.outputs.tag_exists }}
+            version: ${{ steps.plan.outputs.version }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Inspect current version release
+              id: plan
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  version="$(node -p "require('./package.json').version")"
+                  tag="browser-agent-cli-v$version"
+                  if [[ "$GITHUB_REF" == refs/tags/browser-agent-cli-v* && "$GITHUB_REF_NAME" != "$tag" ]]; then
+                    echo "::error::Tag $GITHUB_REF_NAME does not match package version $version (expected $tag)."
+                    exit 1
+                  fi
+
+                  set +e
+                  git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1
+                  tag_status="$?"
+                  set -e
+                  case "$tag_status" in
+                    0)
+                      tag_exists="true"
+                      build_ref="$tag"
+                      ;;
+                    2)
+                      tag_exists="false"
+                      build_ref="$GITHUB_SHA"
+                      ;;
+                    *)
+                      echo "::error::Unable to check whether tag $tag exists."
+                      exit 1
+                      ;;
+                  esac
+
+                  encoded_tag="$(node -p "encodeURIComponent(process.argv[1])" "$tag")"
+                  release_file="$RUNNER_TEMP/browser-agent-cli-release.json"
+                  http_status="$(
+                    curl --silent --show-error --location \
+                      --output "$release_file" \
+                      --write-out "%{http_code}" \
+                      --header "Accept: application/vnd.github+json" \
+                      --header "Authorization: Bearer $GH_TOKEN" \
+                      --header "X-GitHub-Api-Version: 2022-11-28" \
+                      "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$encoded_tag"
+                  )"
+                  case "$http_status" in
+                    200)
+                      release_exists="true"
+                      ;;
+                    404)
+                      release_exists="false"
+                      ;;
+                    *)
+                      message="$(node -e "const fs = require('node:fs'); try { console.log(JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).message || 'Unknown API error'); } catch { console.log('Unknown API error'); }" "$release_file")"
+                      echo "::error::Unable to inspect release $tag: HTTP $http_status: $message"
+                      exit 1
+                      ;;
+                  esac
+
+                  {
+                    echo "version=$version"
+                    echo "tag=$tag"
+                    echo "tag_exists=$tag_exists"
+                    echo "release_exists=$release_exists"
+                    echo "build_ref=$build_ref"
+                  } >> "$GITHUB_OUTPUT"
+
+                  RELEASE_EXISTS="$release_exists" RELEASE_FILE="$release_file" node --input-type=module <<'NODE'
+                  import fs from "node:fs";
+
+                  const targets = [
+                    {
+                      name: "Linux ARM64",
+                      runner: "ubuntu-22.04-arm",
+                      platform: "linux-arm64",
+                      asset_platform: "linux-arm64",
+                      executable_suffix: "",
+                      raw_asset: "browser-agent-linux-arm64",
+                      archive_asset: "browser-agent-linux-arm64.tar.gz",
+                    },
+                    {
+                      name: "Linux x64",
+                      runner: "ubuntu-22.04",
+                      platform: "linux-x64",
+                      asset_platform: "linux-x64",
+                      executable_suffix: "",
+                      raw_asset: "browser-agent-linux-x64",
+                      archive_asset: "browser-agent-linux-x64.tar.gz",
+                    },
+                    {
+                      name: "Windows ARM64",
+                      runner: "windows-11-arm",
+                      platform: "win32-arm64",
+                      asset_platform: "windows-arm64",
+                      executable_suffix: ".exe",
+                      raw_asset: "browser-agent-windows-arm64.exe",
+                      archive_asset: "browser-agent-windows-arm64.zip",
+                    },
+                    {
+                      name: "Windows x64",
+                      runner: "windows-2025",
+                      platform: "win32-x64",
+                      asset_platform: "windows-x64",
+                      executable_suffix: ".exe",
+                      raw_asset: "browser-agent-windows-x64.exe",
+                      archive_asset: "browser-agent-windows-x64.zip",
+                    },
+                    {
+                      name: "macOS ARM64",
+                      runner: "macos-15",
+                      platform: "darwin-arm64",
+                      asset_platform: "macos-arm64",
+                      executable_suffix: "",
+                      raw_asset: "browser-agent-macos-arm64",
+                      archive_asset: "browser-agent-macos-arm64.tar.gz",
+                    },
+                    {
+                      name: "macOS x64",
+                      runner: "macos-15-intel",
+                      platform: "darwin-x64",
+                      asset_platform: "macos-x64",
+                      executable_suffix: "",
+                      raw_asset: "browser-agent-macos-x64",
+                      archive_asset: "browser-agent-macos-x64.tar.gz",
+                    },
+                  ];
+                  const release = process.env.RELEASE_EXISTS === "true"
+                    ? JSON.parse(fs.readFileSync(process.env.RELEASE_FILE, "utf8"))
+                    : { assets: [] };
+                  const existingAssets = new Set(
+                    release.assets.map((asset) => asset.name),
+                  );
+                  const missing = targets.filter(
+                    (target) =>
+                      !existingAssets.has(target.raw_asset) ||
+                      !existingAssets.has(target.archive_asset),
+                  );
+                  fs.appendFileSync(
+                    process.env.GITHUB_OUTPUT,
+                    `matrix=${JSON.stringify({ include: missing })}\n` +
+                      `has_missing=${missing.length > 0}\n`,
+                  );
+                  fs.appendFileSync(
+                    process.env.GITHUB_STEP_SUMMARY,
+                    missing.length === 0
+                      ? "All six platform asset pairs already exist; no platform runners will start.\n"
+                      : `Missing platform builds: ${missing.map((target) => target.name).join(", ")}\n`,
+                  );
+                  NODE
+
     build:
         name: ${{ matrix.name }}
+        if: needs.plan.outputs.has_missing == 'true'
+        needs: plan
         runs-on: ${{ matrix.runner }}
         defaults:
             run:
                 shell: bash
         strategy:
             fail-fast: false
-            matrix:
-                include:
-                    - name: Linux ARM64
-                      runner: ubuntu-22.04-arm
-                      platform: linux-arm64
-                      asset-platform: linux-arm64
-                      executable-suffix: ""
-                    - name: Linux x64
-                      runner: ubuntu-22.04
-                      platform: linux-x64
-                      asset-platform: linux-x64
-                      executable-suffix: ""
-                    - name: Windows ARM64
-                      runner: windows-11-arm
-                      platform: win32-arm64
-                      asset-platform: windows-arm64
-                      executable-suffix: ".exe"
-                    - name: Windows x64
-                      runner: windows-2025
-                      platform: win32-x64
-                      asset-platform: windows-x64
-                      executable-suffix: ".exe"
-                    - name: macOS ARM64
-                      runner: macos-15
-                      platform: darwin-arm64
-                      asset-platform: macos-arm64
-                      executable-suffix: ""
-                    - name: macOS x64
-                      runner: macos-15-intel
-                      platform: darwin-x64
-                      asset-platform: macos-x64
-                      executable-suffix: ""
-
+            matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
         steps:
-            - name: Checkout
+            - name: Checkout release source
               uses: actions/checkout@v4
+              with:
+                  ref: ${{ needs.plan.outputs.build_ref }}
 
             - name: Setup Node
               uses: actions/setup-node@v4
@@ -64,6 +204,16 @@ jobs:
                   node-version: 22
                   cache: npm
                   cache-dependency-path: package-lock.json
+
+            - name: Validate release source version
+              env:
+                  RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+              run: |
+                  source_version="$(node -p "require('./package.json').version")"
+                  if [[ "$source_version" != "$RELEASE_VERSION" ]]; then
+                    echo "::error::Release source version $source_version does not match planned version $RELEASE_VERSION."
+                    exit 1
+                  fi
 
             - name: Install dependencies
               run: npm ci
@@ -75,59 +225,57 @@ jobs:
               run: npm run test:sdk-binary
 
             - name: Stage Linux and macOS release assets
-              if: github.event_name == 'push' && runner.os != 'Windows' && startsWith(github.ref, 'refs/tags/browser-agent-cli-v')
+              if: runner.os != 'Windows'
               env:
-                  ASSET_PLATFORM: ${{ matrix.asset-platform }}
-                  EXECUTABLE_SUFFIX: ${{ matrix.executable-suffix }}
+                  ARCHIVE_ASSET: ${{ matrix.archive_asset }}
+                  EXECUTABLE_SUFFIX: ${{ matrix.executable_suffix }}
                   PLATFORM: ${{ matrix.platform }}
+                  RAW_ASSET: ${{ matrix.raw_asset }}
               run: |
                   release_directory="$RUNNER_TEMP/browser-agent-cli-release"
-                  asset_name="browser-agent-${ASSET_PLATFORM}${EXECUTABLE_SUFFIX}"
                   source="sdk/typescript-sdk/platform-packages/${PLATFORM}/bin/browser-agent${EXECUTABLE_SUFFIX}"
                   mkdir -p "$release_directory"
-                  cp "$source" "$release_directory/$asset_name"
-                  chmod +x "$release_directory/$asset_name"
-                  tar -czf "$release_directory/browser-agent-${ASSET_PLATFORM}.tar.gz" \
+                  cp "$source" "$release_directory/$RAW_ASSET"
+                  chmod +x "$release_directory/$RAW_ASSET"
+                  tar -czf "$release_directory/$ARCHIVE_ASSET" \
                     -C "$release_directory" \
-                    "$asset_name"
+                    "$RAW_ASSET"
 
             - name: Stage Windows release assets
-              if: github.event_name == 'push' && runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/browser-agent-cli-v')
+              if: runner.os == 'Windows'
               shell: pwsh
               env:
-                  ASSET_PLATFORM: ${{ matrix.asset-platform }}
-                  EXECUTABLE_SUFFIX: ${{ matrix.executable-suffix }}
+                  ARCHIVE_ASSET: ${{ matrix.archive_asset }}
+                  EXECUTABLE_SUFFIX: ${{ matrix.executable_suffix }}
                   PLATFORM: ${{ matrix.platform }}
+                  RAW_ASSET: ${{ matrix.raw_asset }}
               run: |
                   $releaseDirectory = Join-Path $env:RUNNER_TEMP "browser-agent-cli-release"
-                  $assetName = "browser-agent-${env:ASSET_PLATFORM}${env:EXECUTABLE_SUFFIX}"
                   $source = "sdk/typescript-sdk/platform-packages/${env:PLATFORM}/bin/browser-agent${env:EXECUTABLE_SUFFIX}"
                   New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
-                  Copy-Item $source (Join-Path $releaseDirectory $assetName)
+                  Copy-Item $source (Join-Path $releaseDirectory $env:RAW_ASSET)
                   Compress-Archive `
-                    -Path (Join-Path $releaseDirectory $assetName) `
-                    -DestinationPath (Join-Path $releaseDirectory "browser-agent-${env:ASSET_PLATFORM}.zip")
+                    -Path (Join-Path $releaseDirectory $env:RAW_ASSET) `
+                    -DestinationPath (Join-Path $releaseDirectory $env:ARCHIVE_ASSET)
 
             - name: Upload release staging artifact
-              if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/browser-agent-cli-v')
               uses: actions/upload-artifact@v4
               with:
-                  name: browser-agent-cli-${{ matrix.asset-platform }}
+                  name: browser-agent-cli-${{ matrix.asset_platform }}
                   path: ${{ runner.temp }}/browser-agent-cli-release/*
                   if-no-files-found: error
                   retention-days: 1
 
     publish-release:
         name: Publish GitHub Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/browser-agent-cli-v')
-        needs: build
+        if: needs.plan.outputs.has_missing == 'true' && needs.build.result == 'success'
+        needs:
+            - plan
+            - build
         runs-on: ubuntu-latest
         permissions:
             contents: write
         steps:
-            - name: Checkout
-              uses: actions/checkout@v4
-
             - name: Download release staging artifacts
               uses: actions/download-artifact@v4
               with:
@@ -135,55 +283,85 @@ jobs:
                   path: release-assets
                   merge-multiple: true
 
-            - name: Validate release version and assets
+            - name: Validate newly built assets
+              env:
+                  MATRIX: ${{ needs.plan.outputs.matrix }}
               shell: bash
               run: |
-                  tag_version="${GITHUB_REF_NAME#browser-agent-cli-v}"
-                  package_version="$(node -p "require('./package.json').version")"
-                  if [[ "$tag_version" != "$package_version" ]]; then
-                    echo "::error::Tag version $tag_version does not match package version $package_version."
-                    exit 1
-                  fi
+                  node --input-type=module <<'NODE'
+                  import fs from "node:fs";
 
-                  expected_assets=(
-                    browser-agent-linux-arm64
-                    browser-agent-linux-arm64.tar.gz
-                    browser-agent-linux-x64
-                    browser-agent-linux-x64.tar.gz
-                    browser-agent-windows-arm64.exe
-                    browser-agent-windows-arm64.zip
-                    browser-agent-windows-x64.exe
-                    browser-agent-windows-x64.zip
-                    browser-agent-macos-arm64
-                    browser-agent-macos-arm64.tar.gz
-                    browser-agent-macos-x64
-                    browser-agent-macos-x64.tar.gz
-                  )
-                  for asset in "${expected_assets[@]}"; do
-                    if [[ ! -f "release-assets/$asset" ]]; then
-                      echo "::error::Missing release asset: $asset"
-                      exit 1
-                    fi
-                  done
-
-                  asset_count="$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
-                  if [[ "$asset_count" != "${#expected_assets[@]}" ]]; then
-                    echo "::error::Expected ${#expected_assets[@]} release assets, found $asset_count."
-                    exit 1
-                  fi
+                  const targets = JSON.parse(process.env.MATRIX).include;
+                  const expected = targets.flatMap((target) => [
+                    target.raw_asset,
+                    target.archive_asset,
+                  ]).sort();
+                  const actual = fs.readdirSync("release-assets").sort();
+                  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+                    throw new Error(
+                      `Expected staged assets ${expected.join(", ")}, found ${actual.join(", ")}`,
+                    );
+                  }
+                  NODE
 
             - name: Create or update GitHub Release
               env:
+                  BUILD_REF: ${{ needs.plan.outputs.build_ref }}
                   GH_TOKEN: ${{ github.token }}
+                  RELEASE_EXISTS: ${{ needs.plan.outputs.release_exists }}
+                  RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+                  RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+                  TAG_EXISTS: ${{ needs.plan.outputs.tag_exists }}
               shell: bash
               run: |
-                  tag="$GITHUB_REF_NAME"
-                  version="${tag#browser-agent-cli-v}"
-                  if gh release view "$tag" >/dev/null 2>&1; then
-                    gh release upload "$tag" release-assets/* --clobber
+                  set -euo pipefail
+
+                  if [[ "$RELEASE_EXISTS" == "true" ]]; then
+                    gh release upload "$RELEASE_TAG" release-assets/* --clobber
+                  elif [[ "$TAG_EXISTS" == "true" ]]; then
+                    gh release create "$RELEASE_TAG" release-assets/* \
+                      --title "Browser Agent CLI $RELEASE_VERSION" \
+                      --generate-notes \
+                      --verify-tag
                   else
-                    gh release create "$tag" release-assets/* \
-                      --title "Browser Agent CLI $version" \
-                      --generate-notes
+                    gh release create "$RELEASE_TAG" release-assets/* \
+                      --title "Browser Agent CLI $RELEASE_VERSION" \
+                      --generate-notes \
+                      --target "$BUILD_REF"
                   fi
-                  gh release edit "$tag" --draft=false
+                  gh release edit "$RELEASE_TAG" --draft=false
+
+            - name: Verify complete release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  release_json="$(gh release view "$RELEASE_TAG" --json assets,isDraft)"
+                  RELEASE_JSON="$release_json" node --input-type=module <<'NODE'
+                  const expected = [
+                    "browser-agent-linux-arm64",
+                    "browser-agent-linux-arm64.tar.gz",
+                    "browser-agent-linux-x64",
+                    "browser-agent-linux-x64.tar.gz",
+                    "browser-agent-windows-arm64.exe",
+                    "browser-agent-windows-arm64.zip",
+                    "browser-agent-windows-x64.exe",
+                    "browser-agent-windows-x64.zip",
+                    "browser-agent-macos-arm64",
+                    "browser-agent-macos-arm64.tar.gz",
+                    "browser-agent-macos-x64",
+                    "browser-agent-macos-x64.tar.gz",
+                  ];
+                  const release = JSON.parse(process.env.RELEASE_JSON);
+                  const assets = new Set(release.assets.map((asset) => asset.name));
+                  const missing = expected.filter((name) => !assets.has(name));
+                  if (release.isDraft) {
+                    throw new Error("Release is still a draft.");
+                  }
+                  if (missing.length > 0) {
+                    throw new Error(`Release is missing assets: ${missing.join(", ")}`);
+                  }
+                  NODE

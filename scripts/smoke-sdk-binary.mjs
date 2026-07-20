@@ -27,6 +27,17 @@ const environment = {
 	PATH: process.platform === "win32" ? "" : "/usr/bin:/bin",
 	OPENAI_API_KEY: "smoke-test",
 };
+const nativeTempPrefixes = ["browser-agent-canvas-", "browser-agent-sharp-"];
+const nativeTempDirectoriesBefore = new Map(
+	nativeTempPrefixes.map((prefix) => [
+		prefix,
+		new Set(
+			fs
+				.readdirSync(os.tmpdir())
+				.filter((name) => name.startsWith(prefix)),
+		),
+	]),
+);
 
 function run(arguments_, input) {
 	const result = spawnSync(executable, arguments_, {
@@ -39,11 +50,6 @@ function run(arguments_, input) {
 	return result;
 }
 
-const before = new Set(
-	fs
-		.readdirSync(os.tmpdir())
-		.filter((name) => name.startsWith("browser-agent-sharp-")),
-);
 const version = run(["--version-json"]);
 assert.equal(version.status, 0);
 assert.deepEqual(JSON.parse(version.stdout), {
@@ -53,7 +59,11 @@ assert.deepEqual(JSON.parse(version.stdout), {
 const after = fs
 	.readdirSync(os.tmpdir())
 	.filter((name) => name.startsWith("browser-agent-sharp-"));
-assert(after.every((name) => before.has(name)));
+assert(
+	after.every((name) =>
+		nativeTempDirectoriesBefore.get("browser-agent-sharp-").has(name),
+	),
+);
 
 const selfTest = run(["--sdk-self-test-json"]);
 assert.equal(selfTest.status, 0, selfTest.stderr);
@@ -114,5 +124,19 @@ const credentialResponse = JSON.parse(credentialRpc.stdout.trim());
 assert.equal(credentialResponse.error.data.code, "CONFIG_INVALID");
 assert(!credentialRpc.stdout.includes("standalone-secret"));
 assert(!credentialRpc.stderr.includes("standalone-secret"));
+if (process.platform === "win32") {
+	for (const [prefix, existing] of nativeTempDirectoriesBefore) {
+		for (const name of fs
+			.readdirSync(os.tmpdir())
+			.filter((candidate) => candidate.startsWith(prefix))) {
+			if (!existing.has(name)) {
+				fs.rmSync(path.join(os.tmpdir(), name), {
+					recursive: true,
+					force: true,
+				});
+			}
+		}
+	}
+}
 fs.rmSync(isolatedDirectory, { recursive: true, force: true });
 console.log(`Standalone SDK binary smoke tests passed for ${platform}.`);
