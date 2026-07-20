@@ -1,0 +1,60 @@
+{
+	"name": "crafty-browser-agent",
+	"version": "0.1.5",
+	"description": "TypeScript SDK for the Crafty Browser Agent",
+	"keywords": [
+		"ai",
+		"automation",
+		"browser",
+		"browser-agent",
+		"llm"
+	],
+	"author": "Crafty",
+	"license": "MIT",
+	"homepage": "https://getcrafty.io",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist",
+		"LICENSE.md",
+		"README.md"
+	],
+	"optionalDependencies": {
+		"crafty-browser-agent-darwin-arm64": "0.1.4",
+		"crafty-browser-agent-darwin-x64": "0.1.4",
+		"crafty-browser-agent-linux-arm64": "0.1.4",
+		"crafty-browser-agent-linux-x64": "0.1.4",
+		"crafty-browser-agent-win32-arm64": "0.1.4",
+		"crafty-browser-agent-win32-x64": "0.1.4"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	},
+	"engines": {
+		"node": ">=20"
+	},
+	"scripts": {
+		"build": "tsc",
+		"check:binary": "node ../../scripts/check-sdk-binary.mjs typescript",
+		"prepack": "npm run build && npm run check:binary",
+		"test": "npm run build && npm run test:types && npm run test:coverage",
+		"test:types": "tsc --noEmit --strict --target ES2022 --module ES2022 --moduleResolution bundler tests/types.types.ts",
+		"test:unit": "tsx --test tests/*.test.ts",
+		"test:coverage": "c8 --all --check-coverage --branches 100 --functions 100 --lines 100 --statements 100 --include='src/**/*.ts' --exclude='src/types.ts' tsx --test tests/*.test.ts"
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"c8": "^12.0.0",
+		"tsx": "^4.19.0",
+		"typescript": "^5.9.3"
+	}
+}

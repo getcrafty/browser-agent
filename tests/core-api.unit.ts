@@ -1,0 +1,4741 @@
+import { assert } from "chai";
+import { afterEach, describe, it } from "mocha";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import yaml from "js-yaml";
+import type { Message } from "../src/agents/types.js";
+import { executeActions } from "../src/agents/executor-utils/action-execution.js";
+import { __setProviderOverrideForTests } from "../src/agents/providers/ai-sdk.js";
+import {
+	configFeatureFlags,
+	setConfigFeatureFlags,
+} from "../src/config-feature-flags.js";
+import { CONTEXT_DIR, STEPS_DIR } from "../src/browser/constants.js";
+import { featureFlags } from "../src/featureFlags.js";
+import { resetStepsDir, setRuntimeOptions } from "../src/runtime-options.js";
+import {
+	closeSession,
+	createPromptForStep,
+	createSession,
+	processModelOutputAndBrowse,
+	runAgent,
+	step,
+} from "../src/core/index.js";
+import { createMockCoreDeps } from "./helpers/core-deps-fixtures.js";
+import { withAuthEncryptionKey } from "./helpers/auth-test-utils.js";
+
+function deferred<T = void>(): {
+	promise: Promise<T>;
+	resolve: (value?: T) => void;
+} {
+	let resolve!: (value?: T) => void;
+	const promise = new Promise<T>((res) => {
+		resolve = res;
+	});
+	return { promise, resolve };
+}
+
+describe("core-api", () => {
+	const originalOmitExecutorThinkingField =
+		configFeatureFlags.omitExecutorThinkingField;
+	const originalExecutorReasoningTraceContext =
+		featureFlags.executorReasoningTraceContext;
+	const originalEnablePlanning = featureFlags.enablePlanning;
+	const originalWebsiteAPIficationTools =
+		configFeatureFlags.websiteAPIficationTools;
+
+	afterEach(() => {
+		configFeatureFlags.omitExecutorThinkingField =
+			originalOmitExecutorThinkingField;
+		featureFlags.executorReasoningTraceContext =
+			originalExecutorReasoningTraceContext;
+		featureFlags.enablePlanning = originalEnablePlanning;
+		configFeatureFlags.websiteAPIficationTools =
+			originalWebsiteAPIficationTools;
+		__setProviderOverrideForTests("vllm", null);
+		__setProviderOverrideForTests("together", null);
+	});
+
+	it("createSession stores session and returns current url", async () => {
+		const deps = createMockCoreDeps();
+		const result = await createSession(deps, {
+			port: 9222,
+			headless: true,
+			url: "https://example.com/start",
+		});
+
+		assert.strictEqual(result.currentUrl, "https://example.com/start");
+		assert.isDefined(deps.registry.get(9222));
+	});
+
+	it("createSession passes through an explicit userDataDir", async () => {
+		const deps = createMockCoreDeps();
+		await createSession(deps, {
+			port: 9333,
+			headless: true,
+			userDataDir: "/tmp/workflow-profile",
+		});
+
+		assert.strictEqual(
+			deps.registry.get(9333)?.browser.userDataDir,
+			"/tmp/workflow-profile",
+		);
+	});
+
+	it("step(create_prompt_for_step) returns prompt and context", async () => {
+		const deps = createMockCoreDeps();
+		await createSession(deps, { port: 9222, headless: true });
+		deps.registry.get(9222)!.activePlan = ["Step 1"];
+
+		const result = await step(deps, {
+			mode: "create_prompt_for_step",
+			port: 9222,
+			userTask: "task",
+			stepsHistory: [],
+		});
+		assert.strictEqual(result.mode, "create_prompt_for_step");
+		if (result.mode === "create_prompt_for_step") {
+			assert.isArray(result.prompt.messages);
+			assert.isNumber(result.context.latest_user_prompt_token_count);
+		}
+	});
+
+	it("step(create_prompt_for_step) allows no plan when planning is disabled", async () => {
+		featureFlags.enablePlanning = false;
+		const deps = createMockCoreDeps();
+		await createSession(deps, { port: 9222, headless: true });
+
+		const result = await step(deps, {
+			mode: "create_prompt_for_step",
+			port: 9222,
+			userTask: "task",
+			stepsHistory: [
+				{
+					payload: {
+						task: "old task",
+						plan: ["old plan"],
+						html: "old html",
+					},
+					assistant: {
+						previousStepPlanUpdate: [{ index: 0, status: "done" }],
+						tools: [],
+						done: false,
+					},
+				},
+			],
+		});
+
+		assert.strictEqual(result.mode, "create_prompt_for_step");
+		if (result.mode === "create_prompt_for_step") {
+			assert.notProperty(result.prompt.payload, "plan");
+			const serializedMessages = JSON.stringify(result.prompt.messages);
+			assert.notInclude(serializedMessages, "old plan");
+			assert.notInclude(serializedMessages, "previousStepPlanUpdate");
+		}
+	});
+
+	it("step(create_prompt_for_step) emits timing logs above threshold", async () => {
+		const logs: string[] = [];
+		const originalConsoleLog = console.log;
+		console.log = (...args: unknown[]) => {
+			logs.push(args.map((value) => String(value)).join(" "));
+		};
+		try {
+			const deps = createMockCoreDeps({
+				getSimplifiedDOM: async () => {
+					await new Promise((resolve) => setTimeout(resolve, 510));
+					return 'div bid="1": hello';
+				},
+			});
+			await createSession(deps, { port: 9222, headless: true });
+			deps.registry.get(9222)!.activePlan = ["Step 1"];
+
+			const result = await step(deps, {
+				mode: "create_prompt_for_step",
+				port: 9222,
+				userTask: "task",
+				stepsHistory: [],
+				stepNumber: 1,
+			});
+
+			assert.strictEqual(result.mode, "create_prompt_for_step");
+			assert.isTrue(
+				logs.some(
+					(entry) =>
+						entry.includes("[step 1 state-extraction]") &&
+						entry.includes("getSimplifiedDOM") &&
+						entry.includes("duration_ms="),
+				),
+				"missing slow getSimplifiedDOM timing log",
+			);
+			assert.isFalse(
+				logs.some(
+					(entry) =>
+						entry.includes("[step 1 state-extraction]") &&
+						entry.includes("buildHistoryMessages") &&
+						entry.includes("duration_ms="),
+				),
+				"fast buildHistoryMessages timing log should be suppressed",
+			);
+		} finally {
+			console.log = originalConsoleLog;
+		}
+	});
+
+	it("step(create_prompt_for_step) recovers when simplified DOM resolution throws stale node", async () => {
+		const logs: string[] = [];
+		const originalConsoleLog = console.log;
+		console.log = (...args: unknown[]) => {
+			logs.push(args.map((value) => String(value)).join(" "));
+		};
+		let domAttempts = 0;
+		try {
+			const deps = createMockCoreDeps({
+				getSimplifiedDOM: async () => {
+					domAttempts += 1;
+					throw new Error("Could not find node with given id");
+				},
+			});
+			await createSession(deps, { port: 9222, headless: true });
+			deps.registry.get(9222)!.activePlan = ["Step 1"];
+
+			const result = await step(deps, {
+				mode: "create_prompt_for_step",
+				port: 9222,
+				userTask: "task",
+				stepsHistory: [],
+				stepNumber: 1,
+			});
+
+			assert.strictEqual(domAttempts, 2);
+			assert.strictEqual(result.mode, "create_prompt_for_step");
+			if (result.mode === "create_prompt_for_step") {
+				assert.strictEqual(result.prompt.payload.html, "");
+				assert.isUndefined(result.prompt.payload.validBids);
+				assert.include(
+					JSON.stringify(
+						result.prompt.payload.interactionErrors ?? [],
+					),
+					"context(html): Could not find node with given id",
+				);
+			}
+			assert.isTrue(
+				logs.some(
+					(entry) =>
+						entry.includes("getSimplifiedDOM:retry") &&
+						entry.includes("duration_ms="),
+				),
+				"missing stale DOM retry timing log",
+			);
+		} finally {
+			console.log = originalConsoleLog;
+		}
+	});
+
+	it("step(create_prompt_for_step) retries pre-step screenshot capture on stale-node errors", async () => {
+		const originalFlag =
+			configFeatureFlags.preStepScreenshotInLatestUserPrompt;
+		setConfigFeatureFlags({ preStepScreenshotInLatestUserPrompt: true });
+		try {
+			let screenshotAttempts = 0;
+			const deps = createMockCoreDeps({
+				capturePreStepScreenshotDataUrl: async () => {
+					screenshotAttempts += 1;
+					if (screenshotAttempts === 1) {
+						throw new Error("Could not find node with given id");
+					}
+					return "data:image/jpeg;base64,AAAA";
+				},
+			});
+			await createSession(deps, { port: 9222, headless: true });
+			deps.registry.get(9222)!.activePlan = ["Step 1"];
+
+			const result = await step(deps, {
+				mode: "create_prompt_for_step",
+				port: 9222,
+				userTask: "task",
+				stepsHistory: [],
+			});
+
+			assert.strictEqual(result.mode, "create_prompt_for_step");
+			assert.strictEqual(screenshotAttempts, 2);
+			if (result.mode === "create_prompt_for_step") {
+				assert.strictEqual(
+					result.prompt.payload
+						.currentPageScreenshotIncludedAsImagePart,
+					true,
+				);
+				assert.notInclude(
+					JSON.stringify(
+						result.prompt.payload.interactionErrors ?? [],
+					),
+					"context(pre_step_screenshot)",
+				);
+			}
+		} finally {
+			setConfigFeatureFlags({
+				preStepScreenshotInLatestUserPrompt: originalFlag,
+			});
+		}
+	});
+
+	it("step(create_prompt_for_step) skips screenshot capture when disabled", async () => {
+		const originalFlag =
+			configFeatureFlags.preStepScreenshotInLatestUserPrompt;
+		setConfigFeatureFlags({ preStepScreenshotInLatestUserPrompt: false });
+		try {
+			let screenshotCalls = 0;
+			const deps = createMockCoreDeps({
+				capturePreStepScreenshotDataUrl: async () => {
+					screenshotCalls += 1;
+					return "data:image/jpeg;base64,AAAA";
+				},
+			});
+			await createSession(deps, { port: 9222, headless: true });
+			deps.registry.get(9222)!.activePlan = ["Step 1"];
+
+			const result = await step(deps, {
+				mode: "create_prompt_for_step",
+				port: 9222,
+				userTask: "task",
+				stepsHistory: [],
+			});
+
+			assert.strictEqual(result.mode, "create_prompt_for_step");
+			assert.strictEqual(screenshotCalls, 0);
+			if (result.mode === "create_prompt_for_step") {
+				assert.notProperty(
+					result.prompt.payload,
+					"currentPageScreenshotIncludedAsImagePart",
+				);
+				assert.isFalse(
+					result.prompt.messages.some((message) =>
+						Array.isArray(message.content)
+							? message.content.some(
+									(part) => part.type === "image_url",
+								)
+							: false,
+					),
+				);
+			}
+		} finally {
+			setConfigFeatureFlags({
+				preStepScreenshotInLatestUserPrompt: originalFlag,
+			});
+		}
+	});
+
+	it("step(create_prompt_for_step) falls back to plan history and protects auth context even if domain decryption fails", async () => {
+		featureFlags.enablePlanning = true;
+		await withAuthEncryptionKey(async () => {
+			let screenshotCalls = 0;
+			let domainCandidateChecks = 0;
+			let domOptions: Record<string, unknown> | undefined;
+			const deps = createMockCoreDeps({
+				getCurrentURL: async () => "https://example.com/dashboard",
+				getSimplifiedDOM: async (_browser, options) => {
+					domOptions = { ...(options ?? {}) };
+					return 'div bid="1": secure';
+				},
+				capturePreStepScreenshotDataUrl: async () => {
+					screenshotCalls += 1;
+					return "data:image/jpeg;base64,AAAA";
+				},
+			});
+			await createSession(deps, { port: 9222, headless: true });
+			const session = deps.registry.get(9222)!;
+			session.authTakeover = {
+				enabled: true,
+				requestAuthDomainCandidates: async () => {
+					domainCandidateChecks += 1;
+					throw new Error("domain callback failed");
+				},
+				requestAuthIdentifierForDomain: async () => undefined,
+				requestAuthPasswordForDomain: async () => undefined,
+				protectedBids: new Set(["u1", "p1"]),
+				suppressScreenshots: true,
+			};
+
+			const result = await step(deps, {
+				mode: "create_prompt_for_step",
+				port: 9222,
+				userTask: "Continue securely",
+				stepsHistory: [
+					{
+						payload: {
+							plan: ["Step from history", 123, null],
+						},
+						assistant: { done: false, actions: [] },
+					},
+				],
+			});
+
+			assert.strictEqual(result.mode, "create_prompt_for_step");
+			assert.deepEqual(domOptions, {
+				includeNonClickableIds: true,
+				redactInputBids: ["u1", "p1"],
+				redactPasswordInputs: true,
+			});
+			assert.strictEqual(domainCandidateChecks, 1);
+			assert.strictEqual(screenshotCalls, 0);
+			assert.deepEqual(session.activePlan, ["Step from history"]);
+			assert.deepEqual(session.planStatuses, ["TODO"]);
+			if (result.mode === "create_prompt_for_step") {
+				assert.deepEqual(result.prompt.payload.plan, [
+					"[TODO] Step from history",
+				]);
+			}
+		});
+	});
+
+	it("step(create_prompt_for_step) auto-switches to the first newly opened tab when enabled", async () => {
+		const tabs = [
+			{
+				targetId: "tab-1",
+				title: "Search Form",
+				url: "https://example.com/search",
+			},
+			{
+				targetId: "tab-2",
+				title: "Results",
+				url: "https://example.com/results",
+			},
+		];
+		let currentTargetId = "tab-1";
+		const deps = createMockCoreDeps({
+			getCurrentURL: async () =>
+				tabs.find((tab) => tab.targetId === currentTargetId)?.url ?? "",
+			getSimplifiedDOM: async () =>
+				currentTargetId === "tab-1"
+					? 'div bid="1": search'
+					: 'div bid="2": results',
+			listTabs: async () => tabs,
+			getNewlyOpenedTabs: (previousTabs, currentTabs) => {
+				const previousTargetIds = new Set(
+					(previousTabs ?? []).map((tab) => tab.targetId),
+				);
+				return currentTabs.filter(
+					(tab) => !previousTargetIds.has(tab.targetId),
+				);
+			},
+			resolveCurrentTabIndex: async () =>
+				tabs.findIndex((tab) => tab.targetId === currentTargetId),
+			switchTab: async (_browser, targetId) => {
+				currentTargetId = targetId;
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+		const session = deps.registry.get(9222)!;
+		session.activePlan = ["Step 1"];
+		session.previousStepTabs = [tabs[0]];
+
+		const result = await step(deps, {
+			mode: "create_prompt_for_step",
+			port: 9222,
+			userTask: "task",
+			stepsHistory: [],
+			autoSwitchToNewTab: true,
+		});
+
+		assert.strictEqual(result.mode, "create_prompt_for_step");
+		if (result.mode === "create_prompt_for_step") {
+			assert.strictEqual(result.prompt.payload.currentURL, tabs[1].url);
+			assert.strictEqual(result.prompt.payload.currentTab, 1);
+			assert.strictEqual(
+				result.prompt.payload.autoTabSwitchNote,
+				"Auto-switched to first newly opened tab.",
+			);
+			assert.deepEqual(result.prompt.payload.newlyOpenedTabs, [
+				"Results",
+			]);
+			assert.strictEqual(
+				result.prompt.payload.html,
+				'div bid="2": results',
+			);
+		}
+		assert.strictEqual(currentTargetId, "tab-2");
+	});
+
+	it("step(create_prompt_for_step) auto-switches tabs by default", async () => {
+		const tabs = [
+			{
+				targetId: "tab-1",
+				title: "Search Form",
+				url: "https://example.com/search",
+			},
+			{
+				targetId: "tab-2",
+				title: "Results",
+				url: "https://example.com/results",
+			},
+		];
+		let currentTargetId = "tab-1";
+		const deps = createMockCoreDeps({
+			getCurrentURL: async () =>
+				tabs.find((tab) => tab.targetId === currentTargetId)?.url ?? "",
+			getSimplifiedDOM: async () =>
+				currentTargetId === "tab-1"
+					? 'div bid="1": search'
+					: 'div bid="2": results',
+			listTabs: async () => tabs,
+			getNewlyOpenedTabs: (previousTabs, currentTabs) => {
+				const previousTargetIds = new Set(
+					(previousTabs ?? []).map((tab) => tab.targetId),
+				);
+				return currentTabs.filter(
+					(tab) => !previousTargetIds.has(tab.targetId),
+				);
+			},
+			resolveCurrentTabIndex: async () =>
+				tabs.findIndex((tab) => tab.targetId === currentTargetId),
+			switchTab: async (_browser, targetId) => {
+				currentTargetId = targetId;
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+		const session = deps.registry.get(9222)!;
+		session.activePlan = ["Step 1"];
+		session.previousStepTabs = [tabs[0]];
+
+		const result = await step(deps, {
+			mode: "create_prompt_for_step",
+			port: 9222,
+			userTask: "task",
+			stepsHistory: [],
+		});
+
+		assert.strictEqual(result.mode, "create_prompt_for_step");
+		if (result.mode === "create_prompt_for_step") {
+			assert.strictEqual(result.prompt.payload.currentURL, tabs[1].url);
+			assert.strictEqual(result.prompt.payload.currentTab, 1);
+			assert.strictEqual(
+				result.prompt.payload.autoTabSwitchNote,
+				"Auto-switched to first newly opened tab.",
+			);
+			assert.deepEqual(result.prompt.payload.newlyOpenedTabs, [
+				"Results",
+			]);
+			assert.strictEqual(
+				result.prompt.payload.html,
+				'div bid="2": results',
+			);
+		}
+		assert.strictEqual(currentTargetId, "tab-2");
+	});
+
+	it("step(create_prompt_for_step) skips auto-switch when explicitly disabled", async () => {
+		const tabs = [
+			{
+				targetId: "tab-1",
+				title: "Search Form",
+				url: "https://example.com/search",
+			},
+			{
+				targetId: "tab-2",
+				title: "Results",
+				url: "https://example.com/results",
+			},
+		];
+		let currentTargetId = "tab-1";
+		const deps = createMockCoreDeps({
+			getCurrentURL: async () =>
+				tabs.find((tab) => tab.targetId === currentTargetId)?.url ?? "",
+			getSimplifiedDOM: async () =>
+				currentTargetId === "tab-1"
+					? 'div bid="1": search'
+					: 'div bid="2": results',
+			listTabs: async () => tabs,
+			getNewlyOpenedTabs: (previousTabs, currentTabs) => {
+				const previousTargetIds = new Set(
+					(previousTabs ?? []).map((tab) => tab.targetId),
+				);
+				return currentTabs.filter(
+					(tab) => !previousTargetIds.has(tab.targetId),
+				);
+			},
+			resolveCurrentTabIndex: async () =>
+				tabs.findIndex((tab) => tab.targetId === currentTargetId),
+			switchTab: async (_browser, targetId) => {
+				currentTargetId = targetId;
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+		const session = deps.registry.get(9222)!;
+		session.activePlan = ["Step 1"];
+		session.planStatuses = ["TODO"];
+		session.previousStepTabs = [tabs[0]];
+
+		const result = await step(deps, {
+			mode: "create_prompt_for_step",
+			port: 9222,
+			userTask: "task",
+			stepsHistory: [],
+			autoSwitchToNewTab: false,
+		});
+
+		assert.strictEqual(result.mode, "create_prompt_for_step");
+		if (result.mode === "create_prompt_for_step") {
+			assert.strictEqual(result.prompt.payload.currentURL, tabs[0].url);
+			assert.strictEqual(result.prompt.payload.currentTab, 0);
+			assert.isUndefined(result.prompt.payload.autoTabSwitchNote);
+			assert.strictEqual(
+				result.prompt.payload.html,
+				'div bid="1": search',
+			);
+		}
+		assert.strictEqual(currentTargetId, "tab-1");
+	});
+
+	it("step(create_prompt_for_step) retries blank simplified DOM before continuing", async () => {
+		let domCalls = 0;
+		const deps = createMockCoreDeps({
+			getSimplifiedDOM: async () => {
+				domCalls += 1;
+				return domCalls < 3 ? "   " : 'div bid="1": ready';
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+		const session = deps.registry.get(9222)!;
+		session.activePlan = ["Step 1"];
+		session.planStatuses = ["TODO"];
+
+		const result = await step(deps, {
+			mode: "create_prompt_for_step",
+			port: 9222,
+			userTask: "task",
+			stepsHistory: [],
+		});
+
+		assert.strictEqual(result.mode, "create_prompt_for_step");
+		assert.strictEqual(domCalls, 3);
+		if (result.mode === "create_prompt_for_step") {
+			assert.strictEqual(
+				result.prompt.payload.html,
+				'div bid="1": ready',
+			);
+		}
+	});
+
+	it("step throws when the session does not exist", async () => {
+		const deps = createMockCoreDeps();
+
+		try {
+			await step(deps, {
+				mode: "browse",
+				port: 9999,
+				generatedActions: [],
+			});
+			assert.fail("Expected SessionNotFoundError");
+		} catch (error) {
+			assert.instanceOf(error, Error);
+			assert.include(
+				String((error as Error).message),
+				"No active browser session found",
+			);
+		}
+	});
+
+	it("step(browse) executes actions and refreshes context", async () => {
+		const deps = createMockCoreDeps();
+		await createSession(deps, { port: 9222, headless: true });
+
+		const result = await step(deps, {
+			mode: "browse",
+			port: 9222,
+			generatedActions: [{ click: "1" }],
+		});
+		assert.strictEqual(result.mode, "browse");
+		if (result.mode === "browse") {
+			assert.strictEqual(result.execution.pending_memory_read, true);
+			assert.isArray(result.context.valid_bids);
+			assert.isArray(result.context.downloaded_files);
+		}
+		assert.strictEqual(deps.registry.get(9222)?.pendingMemoryRead, true);
+	});
+
+	it("step(browse) updates focused browser context after switch_tab", async () => {
+		const tabs = [
+			{
+				targetId: "tab-1",
+				title: "Search",
+				url: "https://example.com/search",
+			},
+			{
+				targetId: "tab-2",
+				title: "Results",
+				url: "https://example.com/results",
+			},
+		];
+		let currentTargetId = "tab-1";
+		const deps = createMockCoreDeps({
+			getCurrentURL: async () =>
+				tabs.find((tab) => tab.targetId === currentTargetId)?.url ?? "",
+			getSimplifiedDOM: async () =>
+				currentTargetId === "tab-1"
+					? 'div bid="1": search'
+					: 'div bid="2": results',
+			listTabs: async () => tabs,
+			resolveCurrentTabIndex: async () =>
+				tabs.findIndex((tab) => tab.targetId === currentTargetId),
+			switchTab: async (_browser, targetId) => {
+				currentTargetId = targetId;
+			},
+			executeActions: async ({ actions, openTabs }) => {
+				const action = actions[0];
+				assert.strictEqual(action?.type, "switch_tab");
+				await deps.switchTab(
+					deps.registry.get(9222)!.browser,
+					openTabs[(action as { index: number }).index].targetId,
+				);
+				return {
+					pendingMemoryRead: false,
+					interactionErrors: [],
+					pendingPlanRegeneration: false,
+					screenshotToolObservations: [],
+					screenshotToolCaptures: [],
+				};
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+		const session = deps.registry.get(9222)!;
+		session.previousStepTabs = tabs;
+		session.browser.currentTargetId = currentTargetId;
+
+		const result = await step(deps, {
+			mode: "browse",
+			port: 9222,
+			generatedActions: [{ type: "switch_tab", index: 1 }],
+		});
+
+		assert.strictEqual(result.mode, "browse");
+		if (result.mode === "browse") {
+			assert.strictEqual(
+				result.context.current_url,
+				"https://example.com/results",
+			);
+			assert.strictEqual(result.context.current_tab, 1);
+			assert.strictEqual(result.context.html, 'div bid="2": results');
+		}
+		assert.strictEqual(currentTargetId, "tab-2");
+	});
+
+	it("step(browse) auto-switches to a newly opened tab before refreshing DOM context", async () => {
+		const tabs = [
+			{
+				targetId: "tab-1",
+				title: "Search",
+				url: "https://example.com/search",
+			},
+			{
+				targetId: "tab-2",
+				title: "Results",
+				url: "https://example.com/results",
+			},
+		];
+		let currentTargetId = "tab-1";
+		let listTabsCalls = 0;
+		const deps = createMockCoreDeps({
+			getCurrentURL: async () =>
+				tabs.find((tab) => tab.targetId === currentTargetId)?.url ?? "",
+			getSimplifiedDOM: async () =>
+				currentTargetId === "tab-1"
+					? 'div bid="1": search'
+					: 'div bid="2": results',
+			listTabs: async () => {
+				listTabsCalls += 1;
+				return listTabsCalls <= 2 ? tabs : tabs;
+			},
+			getNewlyOpenedTabs: (previousTabs, currentTabs) => {
+				const previousTargetIds = new Set(
+					(previousTabs ?? []).map((tab) => tab.targetId),
+				);
+				return currentTabs.filter(
+					(tab) => !previousTargetIds.has(tab.targetId),
+				);
+			},
+			resolveCurrentTabIndex: async () =>
+				tabs.findIndex((tab) => tab.targetId === currentTargetId),
+			switchTab: async (browser, targetId) => {
+				currentTargetId = targetId;
+				browser.currentTargetId = targetId;
+			},
+			executeActions: async () => ({
+				pendingMemoryRead: false,
+				interactionErrors: [],
+				pendingPlanRegeneration: false,
+				screenshotToolObservations: [],
+				screenshotToolCaptures: [],
+			}),
+		});
+		await createSession(deps, { port: 9222, headless: true });
+		const session = deps.registry.get(9222)!;
+		session.previousStepTabs = [tabs[0]];
+		session.browser.currentTargetId = currentTargetId;
+
+		const result = await step(deps, {
+			mode: "browse",
+			port: 9222,
+			generatedActions: [],
+			autoSwitchToNewTab: true,
+		});
+
+		assert.strictEqual(result.mode, "browse");
+		if (result.mode === "browse") {
+			assert.strictEqual(
+				result.context.current_url,
+				"https://example.com/results",
+			);
+			assert.strictEqual(result.context.current_tab, 1);
+			assert.strictEqual(result.context.html, 'div bid="2": results');
+		}
+		assert.strictEqual(currentTargetId, "tab-2");
+	});
+
+	it("step(browse) ignores blank download tabs and restores source tab context", async () => {
+		const downloadDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "browser-agent-blank-tab-download-"),
+		);
+		const tabs = [
+			{
+				targetId: "tab-1",
+				title: "Fiscalité - My SPEDIDAM",
+				url: "https://myspedidam.fr/Fiscalite",
+			},
+			{
+				targetId: "tab-2",
+				title: "New tab",
+				url: "about:blank",
+			},
+		];
+		let currentTargetId = "tab-1";
+		const switchedTargets: string[] = [];
+		const deps = createMockCoreDeps({
+			getCurrentURL: async () =>
+				tabs.find((tab) => tab.targetId === currentTargetId)?.url ?? "",
+			getSimplifiedDOM: async () =>
+				currentTargetId === "tab-1" ? 'a bid="1": Relevé fiscal' : "",
+			listTabs: async () => tabs,
+			getNewlyOpenedTabs: (previousTabs, currentTabs) => {
+				const previousTargetIds = new Set(
+					(previousTabs ?? []).map((tab) => tab.targetId),
+				);
+				return currentTabs.filter(
+					(tab) => !previousTargetIds.has(tab.targetId),
+				);
+			},
+			resolveCurrentTabIndex: async () =>
+				tabs.findIndex((tab) => tab.targetId === currentTargetId),
+			switchTab: async (browser, targetId) => {
+				switchedTargets.push(targetId);
+				currentTargetId = targetId;
+				browser.currentTargetId = targetId;
+			},
+			executeActions: async () => {
+				currentTargetId = "tab-2";
+				fs.writeFileSync(path.join(downloadDir, "37747.pdf"), "pdf");
+				return {
+					pendingMemoryRead: false,
+					interactionErrors: [],
+					pendingPlanRegeneration: false,
+					screenshotToolObservations: [],
+					screenshotToolCaptures: [],
+				};
+			},
+		});
+		await createSession(deps, {
+			port: 9222,
+			headless: true,
+			downloadDir,
+		});
+		const session = deps.registry.get(9222)!;
+		session.previousStepTabs = [tabs[0]];
+		session.browser.currentTargetId = currentTargetId;
+		session.browser.downloadDir = downloadDir;
+		session.downloadedFileSignatures = new Map();
+		session.downloadedNewFilePaths = new Set();
+
+		try {
+			const result = await step(deps, {
+				mode: "browse",
+				port: 9222,
+				generatedActions: [{ click: "1" }],
+				autoSwitchToNewTab: true,
+			});
+
+			assert.strictEqual(result.mode, "browse");
+			if (result.mode === "browse") {
+				assert.strictEqual(
+					result.context.current_url,
+					"https://myspedidam.fr/Fiscalite",
+				);
+				assert.strictEqual(result.context.current_tab, 0);
+				assert.strictEqual(
+					result.context.html,
+					'a bid="1": Relevé fiscal',
+				);
+				assert.deepEqual(result.context.open_tabs, [
+					"Fiscalité - My SPEDIDAM",
+					"New tab",
+				]);
+				assert.deepEqual(result.context.downloaded_files, [
+					"[NEW] ./37747.pdf",
+				]);
+				assert.include(
+					result.execution.interaction_errors,
+					"Ignored blank download tab; stayed on source tab.",
+				);
+			}
+			assert.deepEqual(switchedTargets, ["tab-1"]);
+			assert.strictEqual(currentTargetId, "tab-1");
+		} finally {
+			fs.rmSync(downloadDir, { recursive: true, force: true });
+		}
+	});
+
+	it("step(browse) surfaces malformed action normalization diagnostics", async () => {
+		let executedActions: unknown[] | null = null;
+		const deps = createMockCoreDeps({
+			executeActions: async (params) => {
+				executedActions = params.actions;
+				return {
+					pendingMemoryRead: false,
+					interactionErrors: [],
+					pendingPlanRegeneration: false,
+					screenshotToolObservations: [],
+					screenshotToolCaptures: [],
+				};
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+
+		const result = await step(deps, {
+			mode: "browse",
+			port: 9222,
+			generatedActions: {
+				actions: [
+					{
+						type: "user_takeover",
+						category: "authentication",
+						reason: "Use secure authentication handling.",
+					},
+				],
+			},
+		});
+
+		assert.deepEqual(executedActions, []);
+		assert.strictEqual(result.mode, "browse");
+		if (result.mode === "browse") {
+			assert.include(
+				result.execution.interaction_errors.join(" | "),
+				'action_normalization: actions[0]: user_takeover requires a non-empty "request" string',
+			);
+		}
+	});
+
+	it("step(browse) tolerates execution/context refresh failures and falls back to safe defaults", async () => {
+		let failCurrentUrl = false;
+		const deps = createMockCoreDeps({
+			listTabs: async () => [
+				{
+					targetId: "tab-1",
+					title: "Home",
+					url: "https://fallback.example",
+				},
+			],
+			executeActions: async () => {
+				throw new Error("action runner exploded");
+			},
+			getCurrentURL: async () => {
+				if (failCurrentUrl) {
+					throw new Error("url unavailable");
+				}
+				return "https://example.com";
+			},
+			resolveCurrentTabIndex: async () => {
+				throw new Error("tab unavailable");
+			},
+			getSimplifiedDOM: async () => {
+				throw new Error("dom unavailable");
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+		failCurrentUrl = true;
+
+		const result = await step(deps, {
+			mode: "browse",
+			port: 9222,
+			generatedActions: { actions: [{ click: "1" }] },
+		});
+		assert.strictEqual(result.mode, "browse");
+		if (result.mode === "browse") {
+			assert.deepEqual(result.context.valid_bids, []);
+			assert.strictEqual(
+				result.context.current_url,
+				"https://fallback.example",
+			);
+			assert.include(
+				result.execution.interaction_errors.join(" | "),
+				"execute_actions: action runner exploded",
+			);
+			assert.include(
+				result.execution.interaction_errors.join(" | "),
+				"context(html): dom unavailable",
+			);
+		}
+	});
+
+	it("step(browse) records tab refresh failures before and after execution", async () => {
+		let listTabsCallCount = 0;
+		const deps = createMockCoreDeps({
+			listTabs: async () => {
+				listTabsCallCount += 1;
+				if (listTabsCallCount === 1) {
+					throw new Error("tabs before unavailable");
+				}
+				throw new Error("tabs after unavailable");
+			},
+			executeActions: async (params) => {
+				const automatedResult =
+					await params.attemptAutomatedAuthTakeover?.({});
+				assert.deepEqual(automatedResult, { handled: false });
+				return {
+					pendingMemoryRead: false,
+					interactionErrors: [],
+					pendingPlanRegeneration: false,
+					screenshotToolObservations: [],
+					screenshotToolCaptures: [],
+				};
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+		const session = deps.registry.get(9222)!;
+		session.authTakeover = {
+			enabled: false,
+			requestAuthDomainCandidates: undefined,
+			requestAuthIdentifierForDomain: undefined,
+			requestAuthPasswordForDomain: undefined,
+			protectedBids: new Set<string>(),
+			suppressScreenshots: false,
+		};
+
+		const result = await step(deps, {
+			mode: "browse",
+			port: 9222,
+			generatedActions: [],
+		});
+		assert.strictEqual(result.mode, "browse");
+		if (result.mode === "browse") {
+			assert.include(
+				result.execution.interaction_errors.join(" | "),
+				"context(open_tabs:before): tabs before unavailable",
+			);
+			assert.include(
+				result.execution.interaction_errors.join(" | "),
+				"context(open_tabs:after): tabs after unavailable",
+			);
+		}
+	});
+
+	it("step(browse) stringifies non-Error failures in interaction refresh paths", async () => {
+		const deps = createMockCoreDeps({
+			executeActions: async () => {
+				throw "string failure";
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+
+		const result = await step(deps, {
+			mode: "browse",
+			port: 9222,
+			generatedActions: [],
+		});
+		assert.strictEqual(result.mode, "browse");
+		if (result.mode === "browse") {
+			assert.include(
+				result.execution.interaction_errors.join(" | "),
+				"execute_actions: string failure",
+			);
+		}
+	});
+
+	it("step(browse) handles shorthand tool/action inputs, invalid tab indices, and valid-bid extraction failures", async () => {
+		const deps = createMockCoreDeps({
+			getCurrentURL: async () => "",
+			listTabs: async () => [
+				{
+					targetId: "tab-1",
+					title: "Fallback",
+					url: "https://fallback.example",
+				},
+			],
+			resolveCurrentTabIndex: async () => 99,
+			getSimplifiedDOM: async () => 'div bid="1": hello',
+			extractValidBids: () => {
+				throw new Error("bad bids");
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+
+		const toolsResult = await step(deps, {
+			mode: "browse",
+			port: 9222,
+			generatedActions: { tools: [{ click: "1" }] },
+		});
+		assert.strictEqual(toolsResult.mode, "browse");
+		if (toolsResult.mode === "browse") {
+			assert.strictEqual(toolsResult.context.current_tab, 0);
+			assert.strictEqual(
+				toolsResult.context.current_url,
+				"https://fallback.example",
+			);
+			assert.deepEqual(toolsResult.context.valid_bids, []);
+			assert.include(
+				toolsResult.execution.interaction_errors.join(" | "),
+				"context(valid_bids): bad bids",
+			);
+		}
+
+		const passthroughResult = await step(deps, {
+			mode: "browse",
+			port: 9222,
+			generatedActions: "not-an-action-array",
+		});
+		assert.strictEqual(passthroughResult.mode, "browse");
+	});
+
+	it("step(process_model_step_output) normalizes model output and appends stripped history", async () => {
+		const originalOmitThinking =
+			configFeatureFlags.omitExecutorThinkingField;
+		setConfigFeatureFlags({ omitExecutorThinkingField: true });
+		const deps = createMockCoreDeps();
+		const stepsHistory: Array<{
+			payload: Record<string, unknown>;
+			assistant: unknown;
+		}> = [];
+
+		try {
+			const result = await step(deps, {
+				mode: "process_model_step_output",
+				rawStepOutput: {
+					thinking: "plan",
+					tools: [{ click: "1" }],
+					done: false,
+					result: { foo: "bar" },
+				},
+				promptPayload: {
+					task: "task",
+					plan: ["Step 1"],
+					html: "<div>dom</div>",
+					validBids: ["1"],
+					currentURL: "https://example.com",
+				},
+				stepsHistory,
+			});
+
+			assert.strictEqual(result.mode, "process_model_step_output");
+			if (result.mode === "process_model_step_output") {
+				assert.strictEqual(result.step.done, false);
+				assert.strictEqual(result.step.actions.length, 1);
+			}
+			assert.strictEqual(stepsHistory.length, 1);
+			assert.deepEqual(stepsHistory[0].payload, {
+				currentURL: "https://example.com",
+			});
+			assert.notProperty(
+				stepsHistory[0].assistant as Record<string, unknown>,
+				"thinking",
+			);
+			assert.deepEqual(
+				(stepsHistory[0].assistant as Record<string, unknown>).tools,
+				[{ click: "1" }],
+			);
+			assert.notProperty(
+				stepsHistory[0].assistant as Record<string, unknown>,
+				"done",
+			);
+			assert.notProperty(
+				stepsHistory[0].assistant as Record<string, unknown>,
+				"result",
+			);
+		} finally {
+			setConfigFeatureFlags({
+				omitExecutorThinkingField: originalOmitThinking,
+			});
+		}
+	});
+
+	it("step(process_model_step_output) never stores reasoning traces for OpenAI", async () => {
+		featureFlags.executorReasoningTraceContext = true;
+		const stepsHistory: Array<{
+			payload: Record<string, unknown>;
+			assistant: unknown;
+			reasoningTokens?: string;
+		}> = [];
+
+		await step(createMockCoreDeps(), {
+			mode: "process_model_step_output",
+			rawStepOutput: {
+				actions: [],
+				done: false,
+			},
+			promptPayload: {
+				task: "task",
+				currentURL: "https://example.com",
+			},
+			stepsHistory,
+			executorProvider: "openai",
+			reasoningTokens: "Do not persist this trace.",
+		});
+
+		assert.lengthOf(stepsHistory, 1);
+		assert.notProperty(stepsHistory[0], "reasoningTokens");
+		assert.property(
+			stepsHistory[0].assistant as Record<string, unknown>,
+			"previousStepStatus",
+		);
+		assert.notProperty(
+			stepsHistory[0].assistant as Record<string, unknown>,
+			"done",
+		);
+	});
+
+	it("processModelOutputAndBrowse does not complete from model-authored result", async () => {
+		const deps = createMockCoreDeps({
+			executeActions: async (params) => await executeActions(params),
+		});
+		await createSession(deps, { port: 9222, headless: true });
+		const stepsHistory: Array<{
+			payload: Record<string, unknown>;
+			assistant: unknown;
+		}> = [];
+
+		const result = await processModelOutputAndBrowse(deps, 9222, {
+			mode: "process_model_step_output",
+			rawStepOutput: {
+				thinking: "Done",
+				done: true,
+				result: "Success",
+			},
+			promptPayload: {
+				task: "task",
+				currentURL: "https://example.com",
+			},
+			stepsHistory,
+		});
+
+		assert.isFalse(result.step.done);
+		assert.isFalse(result.successful);
+		assert.isUndefined(result.step.result);
+		assert.isDefined(result.browse);
+		const assistant = stepsHistory[0]?.assistant as Record<string, unknown>;
+		assert.deepEqual(assistant.tools, []);
+		assert.notProperty(assistant, "done");
+		assert.notProperty(assistant, "result");
+	});
+
+	it("processModelOutputAndBrowse preserves verifier-fail state after return_results", async () => {
+		const deps = createMockCoreDeps({
+			executeActions: async () => ({
+				pendingMemoryRead: false,
+				interactionErrors: [],
+				pendingPlanRegeneration: false,
+				screenshotToolObservations: [],
+				screenshotToolCaptures: [],
+				returnedResult: "Upload initiated.",
+			}),
+			verifyTaskSuccess: async () => ({
+				success: false,
+				summary: "Upload did not actually finish.",
+				reasons: [
+					"The final step admitted the upload required manual action.",
+				],
+				model: "gpt-test",
+				provider: "openai",
+				usage: {
+					input_tokens: 2,
+					output_tokens: 1,
+					total_tokens: 3,
+				},
+			}),
+		});
+		await createSession(deps, { port: 9222, headless: true });
+
+		const result = await processModelOutputAndBrowse(deps, 9222, {
+			mode: "process_model_step_output",
+			rawStepOutput: {
+				thinking: "Done",
+				actions: [{ type: "return_results" }],
+			},
+			promptPayload: {
+				task: "Upload the file and confirm it is present.",
+				currentURL: "https://example.com",
+			},
+			stepsHistory: [],
+		});
+
+		assert.isTrue(result.step.done);
+		assert.isFalse(result.successful);
+		assert.strictEqual(
+			result.successVerification?.summary,
+			"Upload did not actually finish.",
+		);
+		assert.deepEqual(result.successVerification?.reasons, [
+			"The final step admitted the upload required manual action.",
+		]);
+		assert.isDefined(result.browse);
+	});
+
+	it("processModelOutputAndBrowse passes stripped prior step history to the verifier", async () => {
+		const originalOmitThinking =
+			configFeatureFlags.omitExecutorThinkingField;
+		setConfigFeatureFlags({ omitExecutorThinkingField: true });
+		let capturedHistory:
+			import("../src/agents/types.js").Message[] | undefined;
+		const deps = createMockCoreDeps({
+			verifyTaskSuccess: async (input) => {
+				capturedHistory = input.historyMessages;
+				return {
+					success: true,
+					summary: "Verified in test fixture.",
+					reasons: [],
+					model: "gpt-test",
+					provider: "openai",
+					usage: {
+						input_tokens: 2,
+						output_tokens: 1,
+						total_tokens: 3,
+					},
+				};
+			},
+		});
+		await createSession(deps, { port: 9222, headless: true });
+
+		try {
+			const result = await processModelOutputAndBrowse(deps, 9222, {
+				mode: "process_model_step_output",
+				rawStepOutput: {
+					thinking: "Done",
+					actions: [{ type: "return_results" }],
+				},
+				promptPayload: {
+					task: "task",
+					currentURL: "https://example.com/final",
+				},
+				stepsHistory: [
+					{
+						payload: {
+							currentURL: "https://example.com/previous",
+							plan: ["Step 1"],
+						},
+						assistant: {
+							thinking: "Click the button",
+							tools: [{ click: "1" }],
+							done: false,
+						},
+					},
+				],
+			});
+
+			assert.isTrue(result.successful);
+			assert.isArray(capturedHistory);
+			assert.lengthOf(capturedHistory ?? [], 4);
+			assert.strictEqual(capturedHistory?.[0]?.role, "user");
+			assert.include(
+				String(capturedHistory?.[0]?.content ?? ""),
+				"currentURL:",
+			);
+			assert.include(
+				String(capturedHistory?.[0]?.content ?? ""),
+				"https://example.com/previous",
+			);
+			assert.strictEqual(capturedHistory?.[1]?.role, "assistant");
+			assert.include(
+				String(capturedHistory?.[1]?.content ?? ""),
+				"tools:",
+			);
+			assert.notInclude(
+				String(capturedHistory?.[1]?.content ?? ""),
+				"thinking:",
+			);
+			assert.strictEqual(capturedHistory?.[2]?.role, "user");
+			assert.strictEqual(capturedHistory?.[3]?.role, "assistant");
+			assert.include(
+				String(capturedHistory?.[3]?.content ?? ""),
+				"return_results",
+			);
+		} finally {
+			setConfigFeatureFlags({
+				omitExecutorThinkingField: originalOmitThinking,
+			});
+		}
+	});
+
+	it("processModelOutputAndBrowse keeps thinking in verifier history when omit flag is disabled", async () => {
+		const originalOmitThinking =
+			configFeatureFlags.omitExecutorThinkingField;
+		setConfigFeatureFlags({ omitExecutorThinkingField: false });
+		let capturedHistory: Array<{ role: string; content: unknown }> | null =
+			null;
+		try {
+			const deps = createMockCoreDeps({
+				verifyTaskSuccess: async (input) => {
+					capturedHistory = input.historyMessages.map((message) => ({
+						role: message.role,
+						content: message.content,
+					}));
+					return {
+						success: true,
+						summary: "Verifier saw history.",
+						reasons: [],
+						model: "gpt-test",
+						provider: "openai",
+						usage: {
+							input_tokens: 1,
+							output_tokens: 1,
+							total_tokens: 2,
+						},
+					};
+				},
+			});
+
+			await createSession(deps, { port: 9222, headless: true });
+			await processModelOutputAndBrowse(deps, 9222, {
+				mode: "process_model_step_output",
+				rawStepOutput: {
+					thinking: "Done",
+					actions: [{ type: "return_results" }],
+				},
+				promptPayload: {
+					task: "task",
+					currentURL: "https://example.com/final",
+				},
+				stepsHistory: [
+					{
+						payload: {
+							currentURL: "https://example.com/previous",
+							plan: ["Step 1"],
+						},
+						assistant: {
+							thinking: "Click the button",
+							tools: [{ click: "1" }],
+							done: false,
+						},
+					},
+				],
+			});
+
+			assert.strictEqual(capturedHistory?.[1]?.role, "assistant");
+			assert.include(
+				String(capturedHistory?.[1]?.content ?? ""),
+				"thinking: Click the button",
+			);
+		} finally {
+			setConfigFeatureFlags({
+				omitExecutorThinkingField: originalOmitThinking,
+			});
+		}
+	});
+
+	it("processModelOutputAndBrowse browses when the model step is not done", async () => {
+		const deps = createMockCoreDeps();
+		await createSession(deps, { port: 9222, headless: true });
+
+		const result = await processModelOutputAndBrowse(deps, 9222, {
+			mode: "process_model_step_output",
+			rawStepOutput: {
+				thinking: "Click",
+				tools: [{ click: "1" }],
+				done: false,
+			},
+			promptPayload: {
+				task: "task",
+				currentURL: "https://example.com",
+			},
+			stepsHistory: [],
+		});
+
+		assert.isFalse(result.step.done);
+		assert.isDefined(result.browse);
+	});
+
+	it("closeSession removes session", async () => {
+		const deps = createMockCoreDeps();
+		await createSession(deps, { port: 9222, headless: true });
+
+		await closeSession(deps, 9222);
+		assert.isUndefined(deps.registry.get(9222));
+	});
+
+	it("runAgent executes the full loop in one call", async () => {
+		const deps = createMockCoreDeps();
+		let callCount = 0;
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+				pinnedMemoryContent: "Prepared context",
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 3,
+			generateStep: async ({ stepNumber, messages }) => {
+				callCount += 1;
+				assert.isAtLeast(messages.length, 2);
+				if (stepNumber === 1) {
+					return {
+						data: {
+							thinking: "Click the result",
+							actions: [{ type: "click", bid: "1" }],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+
+				return {
+					data: {
+						thinking: "Task is complete",
+						actions: [{ type: "return_results" }],
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.strictEqual(callCount, 2);
+		assert.isTrue(result.completed);
+		assert.isTrue(result.successful);
+		assert.strictEqual(result.result, "Success");
+		assert.deepEqual(result.preprocess.plan, []);
+		assert.lengthOf(result.steps, 2);
+		assert.strictEqual(result.steps[0].model.done, false);
+		assert.strictEqual(result.steps[1].model.done, true);
+		assert.strictEqual(result.tokenTotals.input_tokens, 18);
+		assert.strictEqual(result.tokenTotals.output_tokens, 7);
+		assert.strictEqual(result.tokenTotals.total_tokens, 25);
+		assert.strictEqual(result.stepsHistory.length, 2);
+		assert.isUndefined(deps.registry.get(9222));
+	});
+
+	it("runAgent skips initial planning and plan context when planning is disabled", async () => {
+		featureFlags.enablePlanning = false;
+		let createPlanCalls = 0;
+		let pruneCalls = 0;
+		const observedPayloads: Record<string, unknown>[] = [];
+		const observedMessages: unknown[] = [];
+		const deps = createMockCoreDeps({
+			createPlan: async () => {
+				createPlanCalls += 1;
+				return { steps: ["Should not run"] };
+			},
+			choosePreExecutionDomNonClickableIdsToExclude: async () => {
+				pruneCalls += 1;
+				return {
+					thinking: "Should not run",
+					excludedNonClickableIds: [],
+					tokenUsage: {
+						input_tokens: 0,
+						output_tokens: 0,
+						total_tokens: 0,
+					},
+				};
+			},
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 1,
+			generateStep: async ({ promptPayload, messages }) => {
+				observedPayloads.push(promptPayload);
+				observedMessages.push(messages);
+				return {
+					data: {
+						actions: [{ type: "return_results" }],
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.strictEqual(createPlanCalls, 0);
+		assert.strictEqual(pruneCalls, 0);
+		assert.deepEqual(result.preprocess.plan, []);
+		assert.lengthOf(observedPayloads, 1);
+		assert.notProperty(observedPayloads[0], "plan");
+		assert.notInclude(
+			JSON.stringify(observedMessages),
+			"previousStepPlanUpdate",
+		);
+		assert.notInclude(JSON.stringify(observedMessages), "regenerate_plan");
+		assert.notMatch(JSON.stringify(observedMessages), /\bplan/i);
+	});
+
+	it("runAgent forwards the configured reasoning effort to every executor step", async () => {
+		const reasoningByStep: string[] = [];
+		const deps = createMockCoreDeps();
+
+		await runAgent(deps, {
+			session: {
+				port: 9236,
+				headless: true,
+				forceRestart: true,
+				url: "https://example.com",
+			},
+			task: "Finish",
+			stageLLMs: {
+				findTargetURL: {
+					provider: "openai",
+					model: "gpt-5.4",
+					reasoningEffort: "low",
+				},
+				dismissCookieBanner: {
+					provider: "openai",
+					model: "gpt-5.4",
+					reasoningEffort: "low",
+				},
+				createPlan: {
+					provider: "openai",
+					model: "gpt-5.4",
+					reasoningEffort: "low",
+				},
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-5.4",
+					reasoningEffort: "low",
+				},
+				runAgent: {
+					provider: "together",
+					model: "zai-org/GLM-5.2",
+					reasoningEffort: "max",
+				},
+				dataExtraction: {
+					provider: "openai",
+					model: "gpt-5.4",
+					reasoningEffort: "low",
+				},
+			},
+			featureFlags: {
+				...deps.featureFlags,
+				dismissCookieBanner: false,
+				preExecutionDomPruning: false,
+			},
+			initialPlanOverride: ["Finish"],
+			maxSteps: 3,
+			generateStep: async ({ stepNumber, llmOptions }) => {
+				reasoningByStep.push(llmOptions.reasoningEffort);
+				return {
+					data: {
+						actions: [],
+						done: stepNumber === 3,
+						result: stepNumber === 3 ? "done" : undefined,
+					},
+					usage: {
+						input_tokens: 1,
+						output_tokens: 1,
+						total_tokens: 2,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.deepEqual(reasoningByStep, ["max", "max", "max"]);
+	});
+
+	it("runAgent exposes pinned memory only after memory_read and keeps memory_write scoped to the scratchpad", async () => {
+		featureFlags.enablePlanning = true;
+		const observedPlannerRuntimeContexts: unknown[] = [];
+		const deps = createMockCoreDeps({
+			executeActions: async (params) => await executeActions(params),
+			createPlan: async (
+				_task,
+				_dom,
+				_options,
+				_traceOptions,
+				runtimeContext,
+			) => {
+				observedPlannerRuntimeContexts.push(runtimeContext);
+				return { steps: ["Open search", "Check results"] };
+			},
+		});
+		const observedMemoryContent: unknown[] = [];
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+				pinnedMemoryContent: "Pinned workspace context",
+			},
+			task: "Use pinned context",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 5,
+			generateStep: async ({ stepNumber, promptPayload }) => {
+				observedMemoryContent.push(promptPayload.memoryContent);
+				assert.include(
+					String(promptPayload.memoryAvailable),
+					"Prepared workspace/file context is available to the executor through memory_read.",
+				);
+				assert.include(
+					String(promptPayload.memoryAvailable),
+					"Plan for the executor to call memory_read",
+				);
+				if (stepNumber === 1) {
+					assert.isUndefined(promptPayload.memoryContent);
+					return {
+						data: {
+							thinking: "Read preloaded memory",
+							actions: [
+								{
+									type: "memory_read",
+								},
+							],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+
+				if (stepNumber === 2) {
+					assert.strictEqual(
+						promptPayload.memoryContent,
+						[
+							"Runtime-pinned workspace/file context:",
+							"Pinned workspace context",
+							"",
+							"Mutable browser scratchpad:",
+							"(empty)",
+							"",
+							"Extracted page data/result memory:",
+							"(empty)",
+						].join("\n"),
+					);
+					return {
+						data: {
+							thinking: "Write scratchpad",
+							actions: [
+								{
+									type: "memory_write",
+									content: "Mutable scratch note",
+								},
+							],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+
+				if (stepNumber === 3) {
+					assert.isUndefined(promptPayload.memoryContent);
+					return {
+						data: {
+							thinking: "Read updated memory",
+							actions: [
+								{
+									type: "memory_read",
+								},
+							],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+
+				assert.strictEqual(
+					promptPayload.memoryContent,
+					[
+						"Runtime-pinned workspace/file context:",
+						"Pinned workspace context",
+						"",
+						"Mutable browser scratchpad:",
+						"Mutable scratch note",
+						"",
+						"Extracted page data/result memory:",
+						"(empty)",
+					].join("\n"),
+				);
+				return {
+					data: {
+						thinking: "Task is complete",
+						actions: [
+							{
+								type: "return_results",
+								results: [
+									{
+										link: "https://target.example",
+										summary: "Success",
+									},
+								],
+							},
+						],
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.deepEqual(observedMemoryContent, [
+			undefined,
+			[
+				"Runtime-pinned workspace/file context:",
+				"Pinned workspace context",
+				"",
+				"Mutable browser scratchpad:",
+				"(empty)",
+				"",
+				"Extracted page data/result memory:",
+				"(empty)",
+			].join("\n"),
+			undefined,
+			[
+				"Runtime-pinned workspace/file context:",
+				"Pinned workspace context",
+				"",
+				"Mutable browser scratchpad:",
+				"Mutable scratch note",
+				"",
+				"Extracted page data/result memory:",
+				"(empty)",
+			].join("\n"),
+		]);
+		assert.isTrue(result.completed);
+		assert.deepEqual(yaml.load(result.result ?? ""), [
+			{
+				link: "https://target.example",
+				summary: "Success",
+			},
+		]);
+		assert.deepEqual(observedPlannerRuntimeContexts, [
+			{
+				memoryAvailable: true,
+				preparedPasteFiles: [],
+				agentTakeoverAvailable: false,
+				currentUrl: "https://target.example",
+			},
+		]);
+	});
+
+	it("runAgent can return extracted-data memory after memory_read", async () => {
+		const deps = createMockCoreDeps({
+			executeActions: async (params) => await executeActions(params),
+			getSimplifiedDOM: async () =>
+				[
+					'main bid="root": Results',
+					'  article bid="result": First line. Second line.',
+				].join("\n"),
+			extractDataResultsFromSnapshot: async ({
+				currentUrl,
+				simplifiedDom,
+			}) => {
+				assert.strictEqual(currentUrl, "https://target.example");
+				assert.strictEqual(
+					simplifiedDom,
+					"article: First line. Second line.",
+				);
+				return {
+					items: [
+						{
+							link: "https://example.com/snapshot-result",
+							summary: "First line. Second line.",
+						},
+					],
+				};
+			},
+			createPlan: async () => ({ steps: ["Collect result"] }),
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Return the stored result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 4,
+			generateStep: async ({ stepNumber, promptPayload }) => {
+				if (stepNumber === 1) {
+					assert.notProperty(promptPayload, "extractDataUrlsByBid");
+					return {
+						data: {
+							thinking: "Extract result-ready content",
+							actions: [
+								{
+									type: "extract_data",
+									root: "result",
+								},
+							],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+				if (stepNumber === 2) {
+					assert.isUndefined(promptPayload.memoryContent);
+					return {
+						data: {
+							thinking: "Read memory",
+							actions: [{ type: "memory_read" }],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+
+				assert.isString(promptPayload.memoryContent);
+				return {
+					data: {
+						thinking: "Return stored result",
+						actions: [{ type: "return_results" }],
+						done: false,
+					},
+					usage: {
+						input_tokens: 10,
+						output_tokens: 4,
+						total_tokens: 14,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.isTrue(result.completed);
+		assert.deepStrictEqual(yaml.load(result.result ?? ""), [
+			{
+				link: "https://example.com/snapshot-result",
+				summary: "First line. Second line.",
+			},
+		]);
+		assert.isTrue(result.steps.at(-1)?.model.done);
+		for (const historyEntry of result.stepsHistory) {
+			const assistant = historyEntry.assistant as Record<string, unknown>;
+			assert.notProperty(assistant, "done");
+			assert.notProperty(assistant, "result");
+		}
+		for (const loopEntry of result.mainLoopEntries) {
+			const assistant = yaml.load(
+				String(loopEntry.messages.at(-1)?.content ?? ""),
+			) as Record<string, unknown>;
+			assert.notProperty(assistant, "done");
+			assert.notProperty(assistant, "result");
+		}
+	});
+
+	it("runAgent advances to the next step while memory_read waits for extract_data", async () => {
+		const extractionStarted = deferred();
+		const releaseExtraction = deferred();
+		const secondStepGenerated = deferred();
+		let extractionFinished = false;
+		const generatedSteps: number[] = [];
+		const deps = createMockCoreDeps({
+			executeActions: async (params) => await executeActions(params),
+			getSimplifiedDOM: async () =>
+				[
+					'main bid="root": Results',
+					'  article bid="item": Extracted note.',
+				].join("\n"),
+			extractDataResultsFromSnapshot: async ({ simplifiedDom }) => {
+				extractionStarted.resolve();
+				await releaseExtraction.promise;
+				extractionFinished = true;
+				assert.strictEqual(simplifiedDom, "article: Extracted note.");
+				return {
+					items: [
+						{
+							link: "https://example.com/item",
+							summary: "item extracted note",
+						},
+					],
+				};
+			},
+			createPlan: async () => ({ steps: ["Collect result"] }),
+		});
+
+		const resultPromise = runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Return extracted result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 6,
+			generateStep: async ({ stepNumber, promptPayload }) => {
+				generatedSteps.push(stepNumber);
+				if (stepNumber === 1) {
+					return {
+						data: {
+							thinking: "Extract result",
+							actions: [
+								{
+									type: "extract_data",
+									root: "item",
+								},
+							],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+				if (stepNumber === 2) {
+					assert.isFalse(extractionFinished);
+					assert.isUndefined(promptPayload.memoryContent);
+					assert.deepEqual(promptPayload.toolObservations, [
+						"extract_data was launched asynchronously (root=item). The runtime will persist it before memory_read or return_results executes. Do not repeat this extraction unless that memory is intentionally cleared or replaced after this call.",
+					]);
+					secondStepGenerated.resolve();
+					return {
+						data: {
+							thinking: "Read completed extracted data",
+							actions: [{ type: "memory_read" }],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+				assert.isString(promptPayload.memoryContent);
+				return {
+					data: {
+						thinking: "Return completed extracted data",
+						actions: [{ type: "return_results" }],
+						done: false,
+					},
+					usage: {
+						input_tokens: 10,
+						output_tokens: 4,
+						total_tokens: 14,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		await extractionStarted.promise;
+		await secondStepGenerated.promise;
+		assert.deepEqual(generatedSteps, [1, 2]);
+		assert.isFalse(extractionFinished);
+		releaseExtraction.resolve();
+		const result = await resultPromise;
+
+		assert.isTrue(result.completed);
+		assert.deepStrictEqual(yaml.load(result.result ?? ""), [
+			{
+				link: "https://example.com/item",
+				summary: "item extracted note",
+			},
+		]);
+	});
+
+	it("injects background extraction failures into the next step context", async () => {
+		const deps = createMockCoreDeps({
+			executeActions: async (params) => await executeActions(params),
+			getSimplifiedDOM: async () =>
+				'article bid="item": Broken extraction',
+			extractDataResultsFromSnapshot: async () => {
+				throw new Error("provider unavailable");
+			},
+		});
+		await createSession(deps, { port: 9555, headless: true });
+		deps.registry.get(9555)!.activePlan = ["Extract result"];
+
+		await step(deps, {
+			mode: "browse",
+			port: 9555,
+			generatedActions: [{ type: "extract_data", root: "item" }],
+			userTask: "Extract the result",
+			dataExtractionLLMOptions: {
+				provider: "openai",
+				model: "gpt-test",
+			},
+		});
+		await Promise.resolve();
+
+		const prompt = await step(deps, {
+			mode: "create_prompt_for_step",
+			port: 9555,
+			userTask: "Extract the result",
+			stepsHistory: [],
+		});
+		assert.strictEqual(prompt.mode, "create_prompt_for_step");
+		assert.include(
+			JSON.stringify(prompt.prompt.payload.interactionErrors),
+			"extract_data(root=item): provider unavailable",
+		);
+		await closeSession(deps, 9555);
+	});
+
+	it("waits for extraction before forced finalization memory is built", async () => {
+		const deps = createMockCoreDeps();
+		await createSession(deps, { port: 9666, headless: true });
+		const session = deps.registry.get(9666)!;
+		session.activePlan = ["Finalize"];
+		const releaseExtraction = deferred();
+		session.dataExtractionCoordinator.launch({
+			root: "item",
+			run: async () => {
+				await releaseExtraction.promise;
+				return {
+					items: [
+						{
+							link: "https://example.com/item",
+							summary: "forced finalization result",
+						},
+					],
+				};
+			},
+		});
+
+		let promptSettled = false;
+		const promptPromise = step(deps, {
+			mode: "create_prompt_for_step",
+			port: 9666,
+			userTask: "Return the result",
+			stepsHistory: [],
+			forceMemoryContent: true,
+		}).finally(() => {
+			promptSettled = true;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.isFalse(promptSettled);
+
+		releaseExtraction.resolve();
+		const prompt = await promptPromise;
+		assert.strictEqual(prompt.mode, "create_prompt_for_step");
+		assert.include(
+			String(prompt.prompt.payload.memoryContent),
+			"forced finalization result",
+		);
+		await closeSession(deps, 9666);
+	});
+
+	it("session close discards a late extraction without recreating memory", async () => {
+		const deps = createMockCoreDeps();
+		await createSession(deps, { port: 9777, headless: true });
+		const session = deps.registry.get(9777)!;
+		const extractDataMemoryFile = session.extractDataMemoryFile;
+		const releaseExtraction = deferred();
+		session.dataExtractionCoordinator.launch({
+			root: "item",
+			run: async () => {
+				await releaseExtraction.promise;
+				return {
+					items: [
+						{
+							link: "https://example.com/late",
+							summary: "late result",
+						},
+					],
+				};
+			},
+		});
+
+		await closeSession(deps, 9777);
+		assert.isFalse(fs.existsSync(extractDataMemoryFile));
+		releaseExtraction.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+		assert.isFalse(fs.existsSync(extractDataMemoryFile));
+	});
+
+	it("does not complete return_results before memory_read", async () => {
+		const deps = createMockCoreDeps({
+			executeActions: async (params) => await executeActions(params),
+		});
+		await createSession(deps, { port: 9444, headless: true });
+
+		const result = await processModelOutputAndBrowse(deps, 9444, {
+			rawStepOutput: {
+				thinking: "Return too early",
+				actions: [{ type: "return_results" }],
+				done: false,
+			},
+			promptPayload: {
+				task: "Return the stored result",
+				downloadedFiles: [],
+				workspaceFiles: [],
+			},
+			stepsHistory: [],
+		});
+
+		assert.isFalse(result.step.done);
+		assert.include(
+			result.browse?.execution.interaction_errors.join(" | "),
+			"return_results requires completed extract_data",
+		);
+	});
+
+	it("propagates successful website tool results into the next executor payload", async () => {
+		featureFlags.enablePlanning = false;
+		setConfigFeatureFlags({ websiteAPIficationTools: true });
+		const deps = createMockCoreDeps({
+			executeActions: async () => ({
+				pendingMemoryRead: false,
+				interactionErrors: [],
+				pendingPlanRegeneration: false,
+				screenshotToolObservations: [],
+				screenshotToolCaptures: [],
+				websiteToolOutcome: {
+					toolName: "find_profile",
+					completed: true,
+					status: "success",
+					disableTool: false,
+					result: {
+						profileUrl: "https://example.com/profile",
+						profileTitle: "Example Profile",
+					},
+					notes: [],
+					descriptor: {
+						metadata: {
+							name: "find_profile",
+							description: "Find a profile",
+							inputSchema: {},
+							domains: ["example.com"],
+							createdAt: "2026-01-01T00:00:00.000Z",
+						},
+						filePath: "/tmp/find_profile/index.ts",
+						format: "bundle",
+					},
+				},
+			}),
+		});
+		await createSession(deps, { port: 9445, headless: true });
+
+		await processModelOutputAndBrowse(deps, 9445, {
+			rawStepOutput: {
+				thinking: "Use generated tool",
+				actions: [
+					{ type: "website_tool", name: "find_profile", inputs: {} },
+				],
+				done: false,
+			},
+			promptPayload: {
+				task: "Find a matching profile",
+				downloadedFiles: [],
+				workspaceFiles: [],
+			},
+			stepsHistory: [],
+		});
+		const next = await createPromptForStep(deps, {
+			port: 9445,
+			userTask: "Find a matching profile",
+			stepsHistory: [],
+		});
+
+		assert.deepEqual(next.prompt.payload.websiteToolResults, [
+			{
+				toolName: "find_profile",
+				result: {
+					profileUrl: "https://example.com/profile",
+					profileTitle: "Example Profile",
+				},
+			},
+		]);
+
+		setConfigFeatureFlags({ websiteAPIficationTools: false });
+		const disabledNext = await createPromptForStep(deps, {
+			port: 9445,
+			userTask: "Find a matching profile",
+			stepsHistory: [],
+		});
+		assert.notProperty(disabledNext.prompt.payload, "websiteToolResults");
+	});
+
+	it("runAgent can return extracted data written by extract_data", async () => {
+		const secondMarkdown = "## Second item\n\nPrice: $20";
+		let extractionCalls = 0;
+		const simplifiedDomOptions: Array<
+			| import("../src/browser/simplify-dom.js").SimplifyDomOptions
+			| undefined
+		> = [];
+		const deps = createMockCoreDeps({
+			executeActions: async (params) => await executeActions(params),
+			getSimplifiedDOM: async (_browser, options) => {
+				simplifiedDomOptions.push(options);
+				return [
+					'main bid="root": Results',
+					'  article bid="42": First product',
+					'    a bid="43": Open',
+					"    span: Price $12",
+					'  article bid="58c": Second product',
+					"    span: Price $20",
+				].join("\n");
+			},
+			extractDataResultsFromSnapshot: async ({
+				currentUrl,
+				simplifiedDom,
+				llmOptions,
+				task,
+			}) => {
+				extractionCalls += 1;
+				assert.strictEqual(task, "Return extracted result");
+				assert.strictEqual(currentUrl, "https://target.example");
+				assert.deepStrictEqual(llmOptions, {
+					provider: "openai",
+					model: "gpt-test",
+				});
+				assert.strictEqual(
+					simplifiedDom,
+					[
+						"main: Results",
+						"  article: First product",
+						"    a: Open",
+						"    span: Price $12",
+						"  article: Second product",
+						"    span: Price $20",
+					].join("\n"),
+				);
+				return {
+					items: [
+						{
+							link: "https://example.com/item",
+							summary: "## Extracted item\n\nOpen\n\nPrice: $12",
+						},
+						{
+							link: "https://example.com/current",
+							summary: secondMarkdown,
+						},
+					],
+				};
+			},
+			createPlan: async () => ({ steps: ["Extract result"] }),
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Return extracted result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 4,
+			generateStep: async ({ stepNumber, promptPayload }) => {
+				if (stepNumber === 1) {
+					return {
+						data: {
+							thinking: "Extract the result",
+							actions: [
+								{
+									type: "extract_data",
+									root: "root",
+								},
+							],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+				if (stepNumber === 2) {
+					assert.isUndefined(promptPayload.memoryContent);
+					return {
+						data: {
+							thinking: "Read extracted result",
+							actions: [{ type: "memory_read" }],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+				assert.isString(promptPayload.memoryContent);
+				return {
+					data: {
+						thinking: "Return extracted result",
+						actions: [{ type: "return_results" }],
+						done: false,
+					},
+					usage: {
+						input_tokens: 10,
+						output_tokens: 4,
+						total_tokens: 14,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.isTrue(result.completed);
+		assert.strictEqual(extractionCalls, 1);
+		assert.isTrue(
+			simplifiedDomOptions.some(
+				(options) =>
+					options?.includeNonClickableIds === true &&
+					options.preserveFullHrefs === true,
+			),
+		);
+		assert.isTrue(
+			simplifiedDomOptions.some(
+				(options) =>
+					options?.includeNonClickableIds === true &&
+					options.preserveFullHrefs !== true,
+			),
+		);
+		const parsed = yaml.load(result.result ?? "");
+		assert.deepStrictEqual(parsed, [
+			{
+				link: "https://example.com/item",
+				summary: "## Extracted item\n\nOpen\n\nPrice: $12",
+			},
+			{
+				link: "https://example.com/current",
+				summary: secondMarkdown,
+			},
+		]);
+	});
+
+	it("runAgent reserves the final allowed step for return_results-only finalization", async () => {
+		const observedCallers: Array<string | undefined> = [];
+		const observedStepKinds: Array<string | undefined> = [];
+		let actionCalls = 0;
+		const deps = createMockCoreDeps({
+			executeActions: async ({ actions, memoryFile }) => {
+				actionCalls += 1;
+				fs.writeFileSync(memoryFile, "remembered note", "utf-8");
+				return {
+					pendingMemoryRead: false,
+					interactionErrors: [],
+					pendingPlanRegeneration: false,
+					screenshotToolObservations: [],
+					screenshotToolCaptures: [],
+					...(actions.some(
+						(action) => action.type === "return_results",
+					)
+						? { returnedResult: "Recovered result" }
+						: {}),
+				};
+			},
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 2,
+			generateStep: async ({
+				stepNumber,
+				messages,
+				promptPayload,
+				caller,
+				stepKind,
+			}) => {
+				observedCallers.push(caller);
+				observedStepKinds.push(stepKind);
+				if (stepNumber === 1) {
+					return {
+						data: {
+							thinking: "Explore first",
+							actions: [{ type: "click", bid: "1" }],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+
+				assert.strictEqual(caller, "runAgent:maxStepFinalization");
+				assert.strictEqual(stepKind, "max_step_finalization");
+				assert.strictEqual(promptPayload.maxStepFinalization, true);
+				assert.strictEqual(promptPayload.remainingSteps, 0);
+				assert.strictEqual(
+					promptPayload.memoryContent,
+					[
+						"Mutable browser scratchpad:",
+						"remembered note",
+						"",
+						"Extracted page data/result memory:",
+						"(empty)",
+					].join("\n"),
+				);
+				assert.isAtLeast(messages.length, 3);
+				assert.deepEqual(messages[messages.length - 1], {
+					role: "user",
+					content:
+						"This is the final allowed step because the step budget is exhausted.\n\nNo more browser actions may be executed after this response.\n\nUse only the evidence already gathered in the current payload, attached images, prior history, downloads, workspace files, and memoryContent if present (including runtime-pinned workspace/file context).\n\nComplete the task through the runtime-managed result path.\n\nUse bare return_results for completed extract_data memory, or provide the final result list under return_results when it is already grounded in the current payload or memoryContent. Do not invent missing evidence.\n\nRules for this final step:\n- tools MUST contain exactly one return_results call\n- do not include done or result",
+				});
+
+				return {
+					data: {
+						thinking: "Return the gathered result",
+						actions: [{ type: "return_results" }],
+						done: false,
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.strictEqual(actionCalls, 2);
+		assert.deepEqual(observedCallers, [
+			undefined,
+			"runAgent:maxStepFinalization",
+		]);
+		assert.deepEqual(observedStepKinds, [
+			"executor_step",
+			"max_step_finalization",
+		]);
+		assert.isTrue(result.completed);
+		assert.isTrue(result.successful);
+		assert.strictEqual(result.result, "Recovered result");
+		assert.lengthOf(result.steps, 2);
+		assert.isDefined(result.steps[0].browse);
+		assert.isDefined(result.steps[1].browse);
+		assert.strictEqual(
+			result.mainLoopEntries[1]?.step_kind,
+			"max_step_finalization",
+		);
+		const finalAssistant = yaml.load(
+			String(result.mainLoopEntries[1]?.messages.at(-1)?.content ?? ""),
+		) as Record<string, unknown>;
+		assert.notProperty(finalAssistant, "done");
+		assert.notProperty(finalAssistant, "result");
+	});
+
+	it("runAgent treats invalid max-step finalization output as incomplete without browsing", async () => {
+		let actionCalls = 0;
+		const deps = createMockCoreDeps({
+			executeActions: async () => {
+				actionCalls += 1;
+				return {
+					pendingMemoryRead: false,
+					interactionErrors: [],
+					pendingPlanRegeneration: false,
+					screenshotToolObservations: [],
+					screenshotToolCaptures: [],
+				};
+			},
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 1,
+			generateStep: async ({ caller, stepKind }) => {
+				assert.strictEqual(caller, "runAgent:maxStepFinalization");
+				assert.strictEqual(stepKind, "max_step_finalization");
+				return {
+					data: {
+						thinking: "Keep browsing",
+						actions: [{ type: "click", bid: "1" }],
+						done: false,
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.strictEqual(actionCalls, 0);
+		assert.isFalse(result.completed);
+		assert.isFalse(result.successful);
+		assert.lengthOf(result.steps, 1);
+		assert.isUndefined(result.steps[0].browse);
+		assert.strictEqual(
+			result.mainLoopEntries[0]?.step_kind,
+			"max_step_finalization",
+		);
+		assert.lengthOf(result.stepsHistory, 0);
+	});
+
+	it("runAgent ignores model-requested replanning when planning is disabled", async () => {
+		featureFlags.enablePlanning = false;
+		let createPlanCalls = 0;
+		const observedPlans: unknown[] = [];
+		const deps = createMockCoreDeps({
+			createPlan: async () => {
+				createPlanCalls += 1;
+				return { steps: ["Should not run"] };
+			},
+			executeActions: async ({ actions }) => ({
+				pendingMemoryRead: false,
+				interactionErrors: [],
+				pendingPlanRegeneration: actions.some(
+					(action) => action.type === "regenerate_plan",
+				),
+				screenshotToolObservations: [],
+				screenshotToolCaptures: [],
+			}),
+		});
+
+		await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 2,
+			generateStep: async ({ stepNumber, promptPayload }) => {
+				observedPlans.push(promptPayload.plan);
+				return {
+					data:
+						stepNumber === 1
+							? {
+									actions: [{ type: "regenerate_plan" }],
+									done: false,
+								}
+							: {
+									actions: [{ type: "return_results" }],
+								},
+					usage: {
+						input_tokens: 10,
+						output_tokens: 4,
+						total_tokens: 14,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.strictEqual(createPlanCalls, 0);
+		assert.deepEqual(observedPlans, [undefined, undefined]);
+	});
+
+	it("runAgent ignores repeated-action replanning when planning is disabled", async () => {
+		featureFlags.enablePlanning = false;
+		let createPlanCalls = 0;
+		const deps = createMockCoreDeps({
+			createPlan: async () => {
+				createPlanCalls += 1;
+				return { steps: ["Should not run"] };
+			},
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 4,
+			generateStep: async ({ stepNumber }) => ({
+				data:
+					stepNumber <= 3
+						? {
+								actions: [{ type: "click", bid: "1" }],
+								done: false,
+							}
+						: {
+								actions: [{ type: "return_results" }],
+							},
+				usage: {
+					input_tokens: 10,
+					output_tokens: 4,
+					total_tokens: 14,
+				},
+				reasoning_tokens: "",
+			}),
+		});
+
+		assert.isTrue(result.completed);
+		assert.strictEqual(createPlanCalls, 0);
+	});
+
+	it("runAgent retries a transient step failure and succeeds", async () => {
+		const deps = createMockCoreDeps();
+		let generateCalls = 0;
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 1,
+			generateStep: async () => {
+				generateCalls += 1;
+				if (generateCalls === 1) {
+					throw new Error("transient model failure");
+				}
+				return {
+					data: {
+						actions: [{ type: "return_results" }],
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.isTrue(result.completed);
+		assert.strictEqual(generateCalls, 2);
+		assert.lengthOf(result.steps, 1);
+	});
+
+	it("runAgent fails after exhausting step retries", async () => {
+		const deps = createMockCoreDeps();
+		let generateCalls = 0;
+		try {
+			await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Find a result",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					dataExtraction: { provider: "openai", model: "gpt-test" },
+				},
+				featureFlags: deps.featureFlags,
+				maxSteps: 1,
+				generateStep: async () => {
+					generateCalls += 1;
+					throw new Error("permanent model failure");
+				},
+			});
+			assert.fail("Expected runAgent to throw");
+		} catch (error) {
+			assert.include(
+				String((error as Error).message),
+				"permanent model failure",
+			);
+			assert.strictEqual(generateCalls, 3);
+		}
+	});
+
+	it("runAgent aborts pending step generation without retrying", async () => {
+		const deps = createMockCoreDeps();
+		const controller = new AbortController();
+		let generateCalls = 0;
+		let forwardedSignal: AbortSignal | undefined;
+		let resolveGenerateStarted!: () => void;
+		const generateStarted = new Promise<void>((resolve) => {
+			resolveGenerateStarted = resolve;
+		});
+
+		const runPromise = runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			abortSignal: controller.signal,
+			maxSteps: 1,
+			generateStep: async ({ abortSignal }) => {
+				generateCalls += 1;
+				forwardedSignal = abortSignal;
+				resolveGenerateStarted();
+				await new Promise<never>(() => {});
+			},
+		});
+
+		await generateStarted;
+		controller.abort();
+
+		try {
+			await runPromise;
+			assert.fail("Expected runAgent to abort");
+		} catch (error) {
+			assert.strictEqual((error as Error).name, "AbortError");
+			assert.strictEqual(generateCalls, 1);
+			assert.strictEqual(forwardedSignal, controller.signal);
+		}
+	});
+
+	it("runAgent retries fatal action execution errors at the step level", async () => {
+		let actionCalls = 0;
+		let generateCalls = 0;
+		const deps = createMockCoreDeps({
+			executeActions: async ({ actions }) => {
+				actionCalls += 1;
+				if (actionCalls === 1) {
+					throw new Error("browser crashed");
+				}
+				return {
+					pendingMemoryRead: false,
+					interactionErrors: [],
+					pendingPlanRegeneration: false,
+					screenshotToolObservations: [],
+					screenshotToolCaptures: [],
+					...(actions.some(
+						(action) => action.type === "return_results",
+					)
+						? { returnedResult: "Success" }
+						: {}),
+				};
+			},
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 2,
+			generateStep: async ({ stepNumber }) => {
+				generateCalls += 1;
+				if (stepNumber === 1) {
+					return {
+						data: {
+							actions: [{ type: "click", bid: "1" }],
+							done: false,
+						},
+						usage: {
+							input_tokens: 10,
+							output_tokens: 4,
+							total_tokens: 14,
+						},
+						reasoning_tokens: "",
+					};
+				}
+				return {
+					data: {
+						actions: [{ type: "return_results" }],
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.isTrue(result.completed);
+		assert.strictEqual(actionCalls, 3);
+		assert.strictEqual(generateCalls, 3);
+	});
+
+	it("runAgent auto-switches to a new tab by default and respects explicit disable", async () => {
+		const tabs = [
+			{
+				targetId: "tab-1",
+				title: "Search Form",
+				url: "https://example.com/search",
+			},
+			{
+				targetId: "tab-2",
+				title: "Results",
+				url: "https://example.com/results",
+			},
+		];
+		let currentTargetId = "tab-1";
+		let listTabsCalls = 0;
+		const buildDeps = () =>
+			createMockCoreDeps({
+				getCurrentURL: async () =>
+					tabs.find((tab) => tab.targetId === currentTargetId)?.url ??
+					"",
+				getSimplifiedDOM: async () =>
+					currentTargetId === "tab-1"
+						? 'div bid="1": search'
+						: 'div bid="2": results',
+				listTabs: async () => {
+					listTabsCalls += 1;
+					return listTabsCalls === 1 ? [tabs[0]] : tabs;
+				},
+				getNewlyOpenedTabs: (previousTabs, currentTabs) => {
+					const previousTargetIds = new Set(
+						(previousTabs ?? []).map((tab) => tab.targetId),
+					);
+					return currentTabs.filter(
+						(tab) => !previousTargetIds.has(tab.targetId),
+					);
+				},
+				resolveCurrentTabIndex: async () =>
+					tabs.findIndex((tab) => tab.targetId === currentTargetId),
+				switchTab: async (_browser, targetId) => {
+					currentTargetId = targetId;
+				},
+			});
+
+		const defaultPlans: string[] = [];
+		currentTargetId = "tab-1";
+		listTabsCalls = 0;
+		await runAgent(buildDeps(), {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: createMockCoreDeps().featureFlags,
+			maxSteps: 1,
+			generateStep: async ({ promptPayload }) => {
+				defaultPlans.push(String(promptPayload.currentURL ?? ""));
+				return {
+					data: {
+						actions: [{ type: "return_results" }],
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		const disabledPlans: string[] = [];
+		currentTargetId = "tab-1";
+		listTabsCalls = 0;
+		await runAgent(buildDeps(), {
+			session: {
+				port: 9333,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: createMockCoreDeps().featureFlags,
+			autoSwitchToNewTab: false,
+			maxSteps: 1,
+			generateStep: async ({ promptPayload }) => {
+				disabledPlans.push(String(promptPayload.currentURL ?? ""));
+				return {
+					data: {
+						actions: [{ type: "return_results" }],
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				};
+			},
+		});
+
+		assert.deepEqual(defaultPlans, ["https://example.com/results"]);
+		assert.deepEqual(disabledPlans, ["https://example.com/search"]);
+	});
+
+	it("runAgent uses the fixed delay after non-terminal steps and emits timing logs above threshold", async () => {
+		const logs: string[] = [];
+		const originalConsoleLog = console.log;
+		let settleCalls = 0;
+		console.log = (...args: unknown[]) => {
+			logs.push(args.map((value) => String(value)).join(" "));
+		};
+		try {
+			const deps = createMockCoreDeps({
+				waitForAllOpenTabsToSettle: async () => {
+					settleCalls += 1;
+					await new Promise((resolve) => setTimeout(resolve, 510));
+				},
+			});
+
+			await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Find a result",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					dataExtraction: { provider: "openai", model: "gpt-test" },
+				},
+				featureFlags: deps.featureFlags,
+				maxSteps: 2,
+				generateStep: async ({ stepNumber }) =>
+					stepNumber === 1
+						? {
+								data: {
+									previousStepPlanUpdate: [],
+									previousStepStatus: "none",
+									previousStepOutcome: "",
+									currentStateObservation: "",
+									nextActionRationale: "",
+									actions: [{ type: "click", bid: "1" }],
+									done: false,
+								},
+								usage: {
+									input_tokens: 10,
+									output_tokens: 4,
+									total_tokens: 14,
+									time_to_first_token_ms: 20,
+									generation_time_ms: 600,
+								},
+								reasoning_tokens: "",
+							}
+						: {
+								data: {
+									previousStepPlanUpdate: [],
+									previousStepStatus: "progressed",
+									previousStepOutcome: "Clicked the result.",
+									currentStateObservation:
+										"Result content is visible.",
+									nextActionRationale:
+										"Return the requested result.",
+									actions: [{ type: "return_results" }],
+								},
+								usage: {
+									input_tokens: 8,
+									output_tokens: 3,
+									total_tokens: 11,
+									time_to_first_token_ms: 10,
+									generation_time_ms: 25,
+								},
+								reasoning_tokens: "",
+							},
+			});
+
+			assert.strictEqual(settleCalls, 0);
+			assert.isTrue(
+				logs.some(
+					(entry) =>
+						entry.includes("[step 1 timings]") &&
+						entry.includes("wait_for_settle="),
+				),
+				"missing fixed-delay step timing log",
+			);
+			assert.isFalse(
+				logs.some((entry) => entry.includes("token-timing")),
+			);
+		} finally {
+			console.log = originalConsoleLog;
+		}
+	});
+
+	it("runAgent persists step context artifacts when save_steps_context is enabled", async () => {
+		const deps = createMockCoreDeps();
+		try {
+			setRuntimeOptions({ saveStepsContext: true });
+			resetStepsDir();
+
+			const result = await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Find a result",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					dataExtraction: { provider: "openai", model: "gpt-test" },
+				},
+				featureFlags: {
+					...deps.featureFlags,
+					preStepScreenshotInLatestUserPrompt: true,
+				},
+				maxSteps: 1,
+				generateStep: async () => ({
+					data: {
+						thinking: "Task is complete",
+						actions: [{ type: "return_results" }],
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				}),
+			});
+
+			assert.isTrue(result.completed);
+			assert.isTrue(
+				fs.existsSync(path.join(CONTEXT_DIR, "context-001.yaml")),
+			);
+			assert.isTrue(fs.existsSync(path.join(STEPS_DIR, "step-001.yaml")));
+			assert.isTrue(
+				fs.existsSync(
+					path.join(
+						CONTEXT_DIR,
+						"screenshots",
+						"step-001",
+						"pre-step-current-page.jpg",
+					),
+				),
+			);
+		} finally {
+			setRuntimeOptions({ saveStepsContext: true });
+			resetStepsDir();
+		}
+	});
+
+	it("runAgent persists step context artifacts in explicit artifact directories", async () => {
+		const deps = createMockCoreDeps();
+		const artifactsRoot = fs.mkdtempSync(
+			path.join(os.tmpdir(), "browser-agent-artifacts-"),
+		);
+		const contextDir = path.join(artifactsRoot, "context");
+		const stepsDir = path.join(artifactsRoot, "steps");
+		try {
+			setRuntimeOptions({ saveStepsContext: true });
+			resetStepsDir();
+
+			const result = await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Find a result",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					dataExtraction: { provider: "openai", model: "gpt-test" },
+				},
+				featureFlags: deps.featureFlags,
+				maxSteps: 1,
+				artifactDirectories: {
+					contextDir,
+					stepsDir,
+				},
+				generateStep: async () => ({
+					data: {
+						thinking: "Task is complete",
+						actions: [{ type: "return_results" }],
+					},
+					usage: {
+						input_tokens: 8,
+						output_tokens: 3,
+						total_tokens: 11,
+					},
+					reasoning_tokens: "",
+				}),
+			});
+
+			assert.isTrue(result.completed);
+			assert.isTrue(
+				fs.existsSync(path.join(contextDir, "context-001.yaml")),
+			);
+			assert.isTrue(fs.existsSync(path.join(stepsDir, "step-001.yaml")));
+			assert.isFalse(
+				fs.existsSync(path.join(CONTEXT_DIR, "context-001.yaml")),
+			);
+			assert.isFalse(
+				fs.existsSync(path.join(STEPS_DIR, "step-001.yaml")),
+			);
+		} finally {
+			fs.rmSync(artifactsRoot, { recursive: true, force: true });
+			setRuntimeOptions({ saveStepsContext: true });
+			resetStepsDir();
+		}
+	});
+
+	it("runAgent persists pre and post memory snapshots with step context artifacts", async () => {
+		const deps = createMockCoreDeps({
+			executeActions: async (params) => await executeActions(params),
+			getSimplifiedDOM: async () =>
+				[
+					'main bid="root": Results',
+					'  article bid="result": extracted note',
+				].join("\n"),
+			extractDataResultsFromSnapshot: async () => ({
+				items: [
+					{
+						link: "https://example.com/extracted",
+						summary: "extracted note",
+					},
+				],
+			}),
+		});
+		const artifactsRoot = fs.mkdtempSync(
+			path.join(os.tmpdir(), "browser-agent-memory-artifacts-"),
+		);
+		const contextDir = path.join(artifactsRoot, "context");
+		const stepsDir = path.join(artifactsRoot, "steps");
+		try {
+			setRuntimeOptions({ saveStepsContext: true });
+			resetStepsDir();
+
+			const result = await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Remember this",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					dataExtraction: { provider: "openai", model: "gpt-test" },
+				},
+				featureFlags: deps.featureFlags,
+				maxSteps: 3,
+				artifactDirectories: {
+					contextDir,
+					stepsDir,
+				},
+				generateStep: async ({ stepNumber }) => {
+					if (stepNumber === 1) {
+						return {
+							data: {
+								thinking: "Write memory",
+								actions: [
+									{
+										type: "memory_write",
+										content: "remembered note",
+									},
+									{
+										type: "extract_data",
+										root: "result",
+									},
+								],
+								done: false,
+							},
+							usage: {
+								input_tokens: 10,
+								output_tokens: 4,
+								total_tokens: 14,
+							},
+							reasoning_tokens: "",
+						};
+					}
+					return {
+						data: {
+							thinking: stepNumber === 2 ? "Read memory" : "Done",
+							actions: [
+								{
+									type:
+										stepNumber === 2
+											? "memory_read"
+											: "return_results",
+								},
+							],
+							done: false,
+						},
+						usage: {
+							input_tokens: 8,
+							output_tokens: 3,
+							total_tokens: 11,
+						},
+						reasoning_tokens: "",
+					};
+				},
+			});
+
+			assert.isTrue(result.completed);
+			assert.strictEqual(
+				fs.readFileSync(
+					path.join(contextDir, "memory-001.pre-llm.txt"),
+					"utf-8",
+				),
+				"",
+			);
+			assert.strictEqual(
+				fs.readFileSync(
+					path.join(contextDir, "memory-001.post-actions.txt"),
+					"utf-8",
+				),
+				"remembered note",
+			);
+			assert.strictEqual(
+				fs.readFileSync(
+					path.join(
+						contextDir,
+						"extract-data-memory-001.pre-llm.txt",
+					),
+					"utf-8",
+				),
+				"",
+			);
+			assert.strictEqual(
+				fs.readFileSync(
+					path.join(
+						contextDir,
+						"extract-data-memory-001.post-actions.txt",
+					),
+					"utf-8",
+				),
+				"",
+			);
+			assert.strictEqual(
+				fs.readFileSync(
+					path.join(contextDir, "memory-002.pre-llm.txt"),
+					"utf-8",
+				),
+				"remembered note",
+			);
+			assert.strictEqual(
+				fs.readFileSync(
+					path.join(
+						contextDir,
+						"extract-data-memory-002.pre-llm.txt",
+					),
+					"utf-8",
+				),
+				"",
+			);
+			assert.include(
+				fs.readFileSync(
+					path.join(
+						contextDir,
+						"extract-data-memory-002.post-actions.txt",
+					),
+					"utf-8",
+				),
+				"extracted note",
+			);
+		} finally {
+			fs.rmSync(artifactsRoot, { recursive: true, force: true });
+			setRuntimeOptions({ saveStepsContext: true });
+			resetStepsDir();
+		}
+	});
+
+	it("runAgent saves the exact step input messages passed to the model", async () => {
+		const deps = createMockCoreDeps();
+		const originalPreStepScreenshot =
+			configFeatureFlags.preStepScreenshotInLatestUserPrompt;
+		const originalOmitThinking =
+			configFeatureFlags.omitExecutorThinkingField;
+		let capturedStepTwoMessages: Array<{
+			role: string;
+			content: unknown;
+		}> | null = null;
+		try {
+			setRuntimeOptions({ saveStepsContext: true });
+			resetStepsDir();
+			setConfigFeatureFlags({
+				preStepScreenshotInLatestUserPrompt: false,
+				omitExecutorThinkingField: true,
+			});
+
+			const result = await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Find a result",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					verifySuccess: { provider: "openai", model: "gpt-test" },
+				},
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+				featureFlags: {
+					...deps.featureFlags,
+					preStepScreenshotInLatestUserPrompt: false,
+				},
+				maxSteps: 3,
+				generateStep: async ({ stepNumber, messages }) => {
+					if (stepNumber === 2) {
+						capturedStepTwoMessages = messages.map((message) => ({
+							role: message.role,
+							content: message.content,
+						}));
+					}
+					if (stepNumber === 1) {
+						return {
+							data: {
+								previousStepStatus: "progressed",
+								previousStepOutcome:
+									"Entered the departure details.",
+								currentStateObservation:
+									"The search form is populated.",
+								nextActionRationale:
+									"Submit the search to load results.",
+								actions: [],
+								done: false,
+							},
+							usage: {
+								input_tokens: 8,
+								output_tokens: 3,
+								total_tokens: 11,
+							},
+							reasoning_tokens: "",
+						};
+					}
+					return {
+						data: {
+							previousStepStatus: "progressed",
+							previousStepOutcome: "Submitted the search.",
+							currentStateObservation: "Results are available.",
+							nextActionRationale: "Return the requested result.",
+							actions: [{ type: "return_results" }],
+						},
+						usage: {
+							input_tokens: 7,
+							output_tokens: 2,
+							total_tokens: 9,
+						},
+						reasoning_tokens: "",
+					};
+				},
+			});
+
+			assert.isTrue(result.completed);
+			assert.isNotNull(capturedStepTwoMessages);
+			const contextFile = path.join(CONTEXT_DIR, "context-002.yaml");
+			assert.isTrue(fs.existsSync(contextFile));
+			const savedContext = yaml.load(
+				fs.readFileSync(contextFile, "utf-8"),
+			) as Array<{ role: string; content: unknown }>;
+			assert.deepEqual(savedContext, capturedStepTwoMessages);
+			assert.include(
+				String(savedContext.at(-2)?.content ?? ""),
+				"previousStepOutcome: Entered the departure details.",
+			);
+			assert.include(
+				String(savedContext.at(-2)?.content ?? ""),
+				"currentStateObservation: The search form is populated.",
+			);
+			assert.include(
+				String(savedContext.at(-2)?.content ?? ""),
+				"nextActionRationale: Submit the search to load results.",
+			);
+		} finally {
+			setConfigFeatureFlags({
+				preStepScreenshotInLatestUserPrompt: originalPreStepScreenshot,
+				omitExecutorThinkingField: originalOmitThinking,
+			});
+			setRuntimeOptions({ saveStepsContext: true });
+			resetStepsDir();
+		}
+	});
+
+	it("runAgent injects non-OpenAI reasoning traces into the next executor step", async () => {
+		const originalReasoningTraceContext =
+			featureFlags.executorReasoningTraceContext;
+		featureFlags.executorReasoningTraceContext = true;
+		let capturedStepTwoMessages: Message[] | null = null;
+		const deps = createMockCoreDeps({
+			executeActions: async ({ actions }) => ({
+				pendingMemoryRead: false,
+				interactionErrors: [],
+				pendingPlanRegeneration: false,
+				screenshotToolObservations: [],
+				screenshotToolCaptures: [],
+				...(actions.some((action) => action.type === "return_results")
+					? { returnedResult: "Success" }
+					: {}),
+			}),
+		});
+
+		try {
+			const result = await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Find a result",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "vllm", model: "qwen-test" },
+					dataExtraction: { provider: "openai", model: "gpt-test" },
+					verifySuccess: { provider: "openai", model: "gpt-test" },
+				},
+				featureFlags: deps.featureFlags,
+				maxSteps: 3,
+				generateStep: async ({ stepNumber, messages }) => {
+					if (stepNumber === 2) capturedStepTwoMessages = messages;
+					return stepNumber === 1
+						? {
+								data: { actions: [], done: false },
+								usage: {
+									input_tokens: 8,
+									output_tokens: 3,
+									total_tokens: 11,
+								},
+								reasoning_tokens:
+									"Inspect page:\nstatus: ready",
+							}
+						: {
+								data: {
+									actions: [{ type: "return_results" }],
+									done: false,
+								},
+								usage: {
+									input_tokens: 7,
+									output_tokens: 2,
+									total_tokens: 9,
+								},
+								reasoning_tokens: "Return stored results.",
+							};
+				},
+			});
+
+			assert.isTrue(result.completed);
+			assert.strictEqual(
+				result.stepsHistory[0]?.reasoningTokens,
+				"Inspect page:\nstatus: ready",
+			);
+			assert.isNotNull(capturedStepTwoMessages);
+			const systemContent = String(
+				capturedStepTwoMessages?.[0]?.content ?? "",
+			);
+			const previousAssistantContent = String(
+				capturedStepTwoMessages?.at(-2)?.content ?? "",
+			);
+			assert.notInclude(systemContent, "previousStepStatus");
+			assert.include(
+				previousAssistantContent,
+				"<think>\nInspect page:\nstatus: ready\n</think>",
+			);
+			assert.strictEqual(
+				previousAssistantContent.split("Inspect page:").length - 1,
+				1,
+			);
+			assert.notInclude(previousAssistantContent, "previousStepStatus");
+			assert.notInclude(previousAssistantContent, "previousStepOutcome");
+			assert.notInclude(
+				previousAssistantContent,
+				"currentStateObservation",
+			);
+			assert.notInclude(previousAssistantContent, "nextActionRationale");
+		} finally {
+			featureFlags.executorReasoningTraceContext =
+				originalReasoningTraceContext;
+		}
+	});
+
+	it("runAgent logs action-context fields before action execution lines", async () => {
+		const logs: string[] = [];
+		const originalConsoleLog = console.log;
+		const originalOmitThinking =
+			configFeatureFlags.omitExecutorThinkingField;
+		console.log = (...args: unknown[]) => {
+			logs.push(args.map((value) => String(value)).join(" "));
+		};
+		try {
+			setConfigFeatureFlags({ omitExecutorThinkingField: true });
+			const deps = createMockCoreDeps({
+				executeActions: async ({ actions }) => {
+					for (const action of actions ?? []) {
+						if (action.type === "click") {
+							console.log(`    -> click(bid=${action.bid})`);
+						}
+					}
+					return {
+						pendingMemoryRead: false,
+						interactionErrors: [],
+						pendingPlanRegeneration: false,
+						screenshotToolObservations: [],
+						screenshotToolCaptures: [],
+						...(actions.some(
+							(action) => action.type === "return_results",
+						)
+							? { returnedResult: "Success" }
+							: {}),
+					};
+				},
+			});
+
+			const result = await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Find a result",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					verifySuccess: { provider: "openai", model: "gpt-test" },
+				},
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+				featureFlags: deps.featureFlags,
+				maxSteps: 2,
+				generateStep: async ({ stepNumber }) => {
+					if (stepNumber === 1) {
+						return {
+							data: {
+								previousStepStatus: "progressed",
+								previousStepOutcome:
+									"Filled the departure station.",
+								currentStateObservation:
+									"The search form is partially populated.",
+								nextActionRationale:
+									"Click search to load the results page.",
+								actions: [{ type: "click", bid: "24" }],
+								done: false,
+							},
+							usage: {
+								input_tokens: 8,
+								output_tokens: 3,
+								total_tokens: 11,
+							},
+							reasoning_tokens: "",
+						};
+					}
+					return {
+						data: {
+							previousStepStatus: "progressed",
+							previousStepOutcome: "Results loaded.",
+							currentStateObservation:
+								"The target fare is visible.",
+							nextActionRationale: "Return the final answer.",
+							actions: [{ type: "return_results" }],
+						},
+						usage: {
+							input_tokens: 7,
+							output_tokens: 2,
+							total_tokens: 9,
+						},
+						reasoning_tokens: "",
+					};
+				},
+			});
+
+			assert.isTrue(result.completed);
+			const outcomeIndex = logs.findIndex((message) =>
+				message.includes(
+					"previousStepOutcome: Filled the departure station.",
+				),
+			);
+			const stateIndex = logs.findIndex((message) =>
+				message.includes(
+					"currentStateObservation: The search form is partially populated.",
+				),
+			);
+			const rationaleIndex = logs.findIndex((message) =>
+				message.includes(
+					"nextActionRationale: Click search to load the results page.",
+				),
+			);
+			const clickIndex = logs.findIndex((message) =>
+				message.includes("-> click(bid=24)"),
+			);
+			assert.isAtLeast(outcomeIndex, 0);
+			assert.isAtLeast(stateIndex, 0);
+			assert.isAtLeast(rationaleIndex, 0);
+			assert.isAtLeast(clickIndex, 0);
+			assert.isBelow(outcomeIndex, clickIndex);
+			assert.isBelow(stateIndex, clickIndex);
+			assert.isBelow(rationaleIndex, clickIndex);
+		} finally {
+			setConfigFeatureFlags({
+				omitExecutorThinkingField: originalOmitThinking,
+			});
+			console.log = originalConsoleLog;
+		}
+	});
+
+	it("runAgent returns successful=false when return_results fails verification", async () => {
+		const deps = createMockCoreDeps({
+			verifyTaskSuccess: async () => ({
+				success: false,
+				summary: "Task stopped before the required upload completed.",
+				reasons: [
+					"The final result described a partial/manual outcome.",
+				],
+				model: "gpt-test",
+				provider: "openai",
+				usage: {
+					input_tokens: 4,
+					output_tokens: 2,
+					total_tokens: 6,
+				},
+			}),
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Upload the file and confirm it is present.",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 1,
+			generateStep: async () => ({
+				data: {
+					thinking: "I reached the upload dialog.",
+					actions: [{ type: "return_results" }],
+				},
+				usage: {
+					input_tokens: 10,
+					output_tokens: 4,
+					total_tokens: 14,
+				},
+				reasoning_tokens: "",
+			}),
+		});
+
+		assert.isTrue(result.completed);
+		assert.isFalse(result.successful);
+		assert.strictEqual(
+			result.successVerification?.summary,
+			"Task stopped before the required upload completed.",
+		);
+		assert.deepEqual(result.successVerification?.reasons, [
+			"The final result described a partial/manual outcome.",
+		]);
+	});
+
+	it("runAgent accepts auth callbacks through input", async () => {
+		const deps = createMockCoreDeps({
+			featureFlags: {
+				preStepScreenshotInLatestUserPrompt: false,
+				userTakeoverTool: true,
+				authTakeover: true,
+				agentTakeoverTool: false,
+				dismissCookieBanner: true,
+				preExecutionDomPruning: true,
+				omitExecutorThinkingField: true,
+				websiteAPIficationTools: false,
+			},
+		});
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Sign in",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			requestAuthDomainCandidates: async () => [
+				"https://example.com/login",
+			],
+			requestAuthIdentifierForDomain: async () => "user@example.com",
+			requestAuthPasswordForDomain: async () => "secret",
+			maxSteps: 1,
+			keepSessionOpen: true,
+			generateStep: async () => ({
+				data: {
+					thinking: "Task is complete",
+					actions: [{ type: "return_results" }],
+				},
+				usage: {
+					input_tokens: 1,
+					output_tokens: 1,
+					total_tokens: 2,
+				},
+				reasoning_tokens: "",
+			}),
+		});
+
+		assert.isTrue(result.completed);
+		const session = deps.registry.get(9222);
+		assert.isDefined(session?.authTakeover);
+		assert.isDefined(session?.authTakeover?.requestAuthDomainCandidates);
+		assert.isDefined(session?.authTakeover?.requestAuthIdentifierForDomain);
+		assert.isDefined(session?.authTakeover?.requestAuthPasswordForDomain);
+		await closeSession(deps, 9222);
+	});
+
+	it("runAgent surfaces user takeover as userActionRequired", async () => {
+		const deps = createMockCoreDeps({
+			userActionBehavior: "return",
+			executeActions: async () => ({
+				pendingMemoryRead: false,
+				interactionErrors: [],
+				pendingPlanRegeneration: false,
+				screenshotToolObservations: [],
+				screenshotToolCaptures: [],
+				userTakeover: {
+					reason: "Enter the OTP code.",
+				},
+			}),
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Log in and continue",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			userActionBehavior: "return",
+			maxSteps: 2,
+			generateStep: async () => ({
+				data: {
+					thinking: "Login requires OTP",
+					actions: [
+						{
+							type: "user_takeover",
+							request: "Enter the OTP code.",
+						},
+					],
+					done: false,
+				},
+				usage: {
+					input_tokens: 10,
+					output_tokens: 4,
+					total_tokens: 14,
+				},
+				reasoning_tokens: "",
+			}),
+		});
+
+		assert.isFalse(result.completed);
+		assert.isNull(result.result);
+		assert.deepEqual(result.userActionRequired, {
+			kind: "browser_user_takeover",
+			reason: "Enter the OTP code.",
+			category: "otp",
+		});
+	});
+
+	it("runAgent continues when authentication takeover is handled automatically", async () => {
+		const originalFeatureFlags = { ...configFeatureFlags };
+		const deps = createMockCoreDeps({
+			featureFlags: {
+				preStepScreenshotInLatestUserPrompt: false,
+				userTakeoverTool: true,
+				authTakeover: true,
+				agentTakeoverTool: false,
+				dismissCookieBanner: true,
+				preExecutionDomPruning: true,
+				omitExecutorThinkingField: true,
+				websiteAPIficationTools: false,
+			},
+			executeActions: async (params) =>
+				params.actions.some(
+					(action) => action.type === "return_results",
+				)
+					? {
+							pendingMemoryRead: false,
+							interactionErrors: [],
+							pendingPlanRegeneration: false,
+							screenshotToolObservations: [],
+							screenshotToolCaptures: [],
+							returnedResult: "Success",
+						}
+					: await executeActions({
+							...params,
+							attemptAutomatedAuthTakeover: async () => ({
+								handled: true,
+							}),
+						}),
+		});
+		let callCount = 0;
+
+		try {
+			setConfigFeatureFlags(deps.featureFlags);
+			const result = await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Log in and continue",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					dataExtraction: { provider: "openai", model: "gpt-test" },
+				},
+				featureFlags: deps.featureFlags,
+				maxSteps: 2,
+				generateStep: async ({ stepNumber }) => {
+					callCount += 1;
+					if (stepNumber === 1) {
+						return {
+							data: {
+								thinking: "The page needs credentials.",
+								actions: [
+									{
+										type: "user_takeover",
+										category: "authentication",
+										request:
+											"Enter your login credentials.",
+									},
+								],
+								done: false,
+							},
+							usage: {
+								input_tokens: 10,
+								output_tokens: 4,
+								total_tokens: 14,
+							},
+							reasoning_tokens: "",
+						};
+					}
+					return {
+						data: {
+							thinking: "Task is complete",
+							actions: [{ type: "return_results" }],
+						},
+						usage: {
+							input_tokens: 8,
+							output_tokens: 3,
+							total_tokens: 11,
+						},
+						reasoning_tokens: "",
+					};
+				},
+			});
+
+			assert.strictEqual(callCount, 2);
+			assert.isTrue(result.completed);
+			assert.strictEqual(result.result, "Success");
+			assert.isUndefined(result.userActionRequired);
+		} finally {
+			setConfigFeatureFlags(originalFeatureFlags);
+		}
+	});
+
+	it("runAgent surfaces split probe/result auth takeover attempts in order", async () => {
+		const originalFeatureFlags = { ...configFeatureFlags };
+		const deps = createMockCoreDeps({
+			featureFlags: {
+				preStepScreenshotInLatestUserPrompt: false,
+				userTakeoverTool: true,
+				authTakeover: true,
+				agentTakeoverTool: false,
+				dismissCookieBanner: true,
+				preExecutionDomPruning: true,
+				omitExecutorThinkingField: true,
+				websiteAPIficationTools: false,
+			},
+			executeActions: async (params) =>
+				await executeActions({
+					...params,
+					attemptAutomatedAuthTakeover: async () => ({
+						handled: true,
+						traceEntries: [
+							{
+								step_kind: "auth_takeover_attempt",
+								step: 2,
+								attempt: 1,
+								stage: "probe",
+								decisionAction: "submit_credentials",
+								selectedBidsPresent: {
+									username: true,
+									password: true,
+									submit: true,
+									continue: false,
+									stayLoggedInCheckbox: false,
+								},
+								messages: [
+									{ role: "system", content: "probe-system" },
+									{ role: "user", content: "probe-user" },
+									{
+										role: "assistant",
+										content: "probe-assistant",
+									},
+								],
+								token_usage: {
+									input_tokens: 11,
+									output_tokens: 5,
+									total_tokens: 16,
+								},
+								outcome: "submitted_credentials",
+								outcomeReason: "credentials_submitted",
+							},
+							{
+								step_kind: "auth_takeover_attempt",
+								step: 3,
+								attempt: 1,
+								stage: "result",
+								decisionAction: "submit_credentials",
+								selectedBidsPresent: {
+									username: true,
+									password: true,
+									submit: true,
+									continue: false,
+									stayLoggedInCheckbox: false,
+								},
+								messages: [
+									{
+										role: "system",
+										content: "result-system",
+									},
+									{ role: "user", content: "result-user" },
+									{
+										role: "assistant",
+										content: "result-assistant",
+									},
+								],
+								token_usage: {
+									input_tokens: 7,
+									output_tokens: 3,
+									total_tokens: 10,
+								},
+								outcome: "success_or_redirect",
+								outcomeReason: "dashboard visible",
+							},
+						],
+					}),
+				}),
+		});
+
+		try {
+			setConfigFeatureFlags(deps.featureFlags);
+			const result = await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Log in and continue",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					dataExtraction: { provider: "openai", model: "gpt-test" },
+				},
+				featureFlags: deps.featureFlags,
+				maxSteps: 2,
+				generateStep: async ({ stepNumber }) => {
+					if (stepNumber === 1) {
+						return {
+							data: {
+								thinking: "Needs auth",
+								actions: [
+									{
+										type: "user_takeover",
+										category: "authentication",
+										request:
+											"Enter your login credentials.",
+									},
+								],
+								done: false,
+							},
+							usage: {
+								input_tokens: 10,
+								output_tokens: 4,
+								total_tokens: 14,
+							},
+							reasoning_tokens: "",
+						};
+					}
+					return {
+						data: {
+							thinking: "Done",
+							actions: [{ type: "return_results" }],
+						},
+						usage: {
+							input_tokens: 8,
+							output_tokens: 3,
+							total_tokens: 11,
+						},
+						reasoning_tokens: "",
+					};
+				},
+			});
+
+			const attempts =
+				result.steps[0]?.browse?.execution.auth_takeover_attempts ?? [];
+			assert.lengthOf(attempts, 2);
+			assert.deepEqual(
+				attempts.map((entry) => entry.step),
+				[2, 3],
+			);
+			assert.deepEqual(
+				attempts.map((entry) => entry.stage),
+				["probe", "result"],
+			);
+			assert.deepEqual(
+				(attempts[0]?.messages ?? []).map(
+					(message) => (message as { role?: string }).role,
+				),
+				["system", "user", "assistant"],
+			);
+			assert.deepEqual(
+				(attempts[1]?.messages ?? []).map(
+					(message) => (message as { role?: string }).role,
+				),
+				["system", "user", "assistant"],
+			);
+		} finally {
+			setConfigFeatureFlags(originalFeatureFlags);
+		}
+	});
+
+	it("runAgent still uses authentication user_takeover as an automatic-auth trigger when manual takeover is disabled", async () => {
+		const originalFeatureFlags = { ...configFeatureFlags };
+		const deps = createMockCoreDeps({
+			featureFlags: {
+				preStepScreenshotInLatestUserPrompt: false,
+				userTakeoverTool: false,
+				authTakeover: true,
+				agentTakeoverTool: false,
+				dismissCookieBanner: true,
+				preExecutionDomPruning: true,
+				omitExecutorThinkingField: true,
+				websiteAPIficationTools: false,
+			},
+			executeActions: async (params) =>
+				params.actions.some(
+					(action) => action.type === "return_results",
+				)
+					? {
+							pendingMemoryRead: false,
+							interactionErrors: [],
+							pendingPlanRegeneration: false,
+							screenshotToolObservations: [],
+							screenshotToolCaptures: [],
+							returnedResult: "Success",
+						}
+					: await executeActions({
+							...params,
+							attemptAutomatedAuthTakeover: async () => ({
+								handled: true,
+							}),
+						}),
+		});
+		let callCount = 0;
+
+		try {
+			setConfigFeatureFlags(deps.featureFlags);
+			const result = await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Log in and continue",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					dataExtraction: { provider: "openai", model: "gpt-test" },
+				},
+				featureFlags: deps.featureFlags,
+				maxSteps: 2,
+				generateStep: async ({ stepNumber }) => {
+					callCount += 1;
+					if (stepNumber === 1) {
+						return {
+							data: {
+								thinking: "The page needs credentials.",
+								actions: [
+									{
+										type: "user_takeover",
+										category: "authentication",
+										request:
+											"Enter your login credentials.",
+									},
+								],
+								done: false,
+							},
+							usage: {
+								input_tokens: 10,
+								output_tokens: 4,
+								total_tokens: 14,
+							},
+							reasoning_tokens: "",
+						};
+					}
+					return {
+						data: {
+							thinking: "Task is complete",
+							actions: [{ type: "return_results" }],
+						},
+						usage: {
+							input_tokens: 8,
+							output_tokens: 3,
+							total_tokens: 11,
+						},
+						reasoning_tokens: "",
+					};
+				},
+			});
+
+			assert.strictEqual(callCount, 2);
+			assert.isTrue(result.completed);
+			assert.strictEqual(result.result, "Success");
+			assert.isUndefined(result.userActionRequired);
+		} finally {
+			setConfigFeatureFlags(originalFeatureFlags);
+		}
+	});
+
+	it("runAgent suppresses manual takeover when automatic authentication is not handled and manual takeover is disabled", async () => {
+		const originalFeatureFlags = { ...configFeatureFlags };
+		const deps = createMockCoreDeps({
+			featureFlags: {
+				preStepScreenshotInLatestUserPrompt: false,
+				userTakeoverTool: false,
+				authTakeover: true,
+				agentTakeoverTool: false,
+				dismissCookieBanner: true,
+				preExecutionDomPruning: true,
+				omitExecutorThinkingField: true,
+				websiteAPIficationTools: false,
+			},
+			executeActions: async (params) =>
+				await executeActions({
+					...params,
+					attemptAutomatedAuthTakeover: async () => ({
+						handled: false,
+					}),
+				}),
+		});
+
+		try {
+			setConfigFeatureFlags(deps.featureFlags);
+			const result = await runAgent(deps, {
+				session: {
+					port: 9222,
+					headless: true,
+					forceRestart: true,
+				},
+				task: "Log in and continue",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					createPlan: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: {
+						provider: "openai",
+						model: "gpt-test",
+					},
+					runAgent: { provider: "openai", model: "gpt-test" },
+					dataExtraction: { provider: "openai", model: "gpt-test" },
+				},
+				featureFlags: deps.featureFlags,
+				maxSteps: 2,
+				generateStep: async () => ({
+					data: {
+						thinking: "The page needs credentials.",
+						actions: [
+							{
+								type: "user_takeover",
+								category: "authentication",
+								request: "Enter your login credentials.",
+							},
+						],
+						done: false,
+					},
+					usage: {
+						input_tokens: 10,
+						output_tokens: 4,
+						total_tokens: 14,
+					},
+					reasoning_tokens: "",
+				}),
+			});
+
+			assert.isFalse(result.completed);
+			assert.isUndefined(result.userActionRequired);
+			assert.include(
+				result.steps[0]?.browse?.execution.interaction_errors.join(
+					" | ",
+				) ?? "",
+				"automated auth not handled and manual takeover disabled",
+			);
+		} finally {
+			setConfigFeatureFlags(originalFeatureFlags);
+		}
+	});
+
+	it("runAgent skips cookie dismissal and DOM pruning when disabled in core deps feature flags", async () => {
+		let dismissCookieBannerCalls = 0;
+		let preExecutionDomPruningCalls = 0;
+		const deps = createMockCoreDeps({
+			featureFlags: {
+				preStepScreenshotInLatestUserPrompt: false,
+				userTakeoverTool: true,
+				authTakeover: false,
+				agentTakeoverTool: false,
+				dismissCookieBanner: false,
+				preExecutionDomPruning: false,
+				omitExecutorThinkingField: true,
+				websiteAPIficationTools: false,
+			},
+			dismissCookieBanner: async () => {
+				dismissCookieBannerCalls += 1;
+			},
+			choosePreExecutionDomNonClickableIdsToExclude: async () => {
+				preExecutionDomPruningCalls += 1;
+				return {
+					thinking: "remove noise",
+					excludedNonClickableIds: ["nc1"],
+					tokenUsage: {
+						input_tokens: 1,
+						output_tokens: 2,
+						total_tokens: 3,
+					},
+				};
+			},
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 1,
+			generateStep: async () => ({
+				data: {
+					thinking: "Task is complete",
+					actions: [{ type: "return_results" }],
+				},
+				usage: {
+					input_tokens: 8,
+					output_tokens: 3,
+					total_tokens: 11,
+				},
+				reasoning_tokens: "",
+			}),
+		});
+
+		assert.strictEqual(dismissCookieBannerCalls, 0);
+		assert.strictEqual(preExecutionDomPruningCalls, 0);
+		assert.deepEqual(result.preprocess.dom_pruning, {
+			thinking: "",
+			excluded_non_clickable_ids: [],
+			token_usage: {
+				input_tokens: 0,
+				output_tokens: 0,
+				total_tokens: 0,
+			},
+		});
+	});
+
+	it("runAgent bypasses findTargetURL when a session url is provided", async () => {
+		let findTargetURLCalls = 0;
+		const providedUrl = "https://example.com/provided";
+		const deps = createMockCoreDeps({
+			findTargetURL: async () => {
+				findTargetURLCalls += 1;
+				return "https://target.example";
+			},
+		});
+
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				url: providedUrl,
+				forceRestart: true,
+			},
+			task: "Use the provided url",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
+				},
+				runAgent: { provider: "openai", model: "gpt-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 1,
+			generateStep: async () => ({
+				data: {
+					thinking: "Task is complete",
+					actions: [{ type: "return_results" }],
+				},
+				usage: {
+					input_tokens: 8,
+					output_tokens: 3,
+					total_tokens: 11,
+				},
+				reasoning_tokens: "",
+			}),
+		});
+
+		assert.strictEqual(findTargetURLCalls, 0);
+		assert.strictEqual(result.preprocess.target_url, providedUrl);
+		assert.strictEqual(result.preprocess.final_url, providedUrl);
+	});
+});

@@ -1,0 +1,22 @@
+{
+	"name": "crafty-browser-agent-darwin-arm64",
+	"version": "0.1.4",
+	"description": "Crafty Browser Agent executable for macOS ARM64",
+	"license": "MIT",
+	"os": [
+		"darwin"
+	],
+	"cpu": [
+		"arm64"
+	],
+	"files": [
+		"bin"
+	],
+	"scripts": {
+		"prepack": "node ../../../../scripts/check-sdk-binary.mjs typescript darwin-arm64"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	}
+}

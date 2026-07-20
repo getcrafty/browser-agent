@@ -1,0 +1,695 @@
+import yaml from "js-yaml";
+import type {
+	ContentPart,
+	Message,
+	LLMOptions,
+	TokenUsage,
+	ChatJSONResult,
+	ChatYAMLTraceEvent,
+} from "../types.js";
+import { countInputTokensOpenAI, runProviderChat } from "./ai-sdk.js";
+
+const MAX_RETRIES = 5;
+const BASE_RETRY_DELAY_MS = 500;
+const DEFAULT_OPENAI_TOKEN_COUNT_MODEL = "gpt-5.2";
+const DEFAULT_CHAT_YAML_HARD_TIMEOUT_MS = 300_000;
+
+const CHAT_YAML_HARD_TIMEOUT_MS_ENV = "BROWSER_AGENT_CHAT_YAML_HARD_TIMEOUT_MS";
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function toErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+class ChatYAMLHardTimeoutError extends Error {
+	constructor(input: {
+		provider: LLMOptions["provider"];
+		caller: string;
+		attempt: number;
+		timeoutMs: number;
+	}) {
+		super(
+			`chatYAML hard timeout (provider=${input.provider}, caller=${input.caller}, attempt=${input.attempt}, timeoutMs=${input.timeoutMs})`,
+		);
+		this.name = "ChatYAMLHardTimeoutError";
+	}
+}
+
+class ChatYAMLAbortError extends Error {
+	constructor(reason?: unknown) {
+		super(
+			reason instanceof Error
+				? reason.message
+				: "Browser agent run cancelled.",
+		);
+		this.name = "AbortError";
+	}
+}
+
+function isAbortError(error: unknown) {
+	return (
+		error instanceof Error &&
+		(error.name === "AbortError" ||
+			error.message === "Browser agent run cancelled.")
+	);
+}
+
+function readPositiveIntEnv(name: string): number | null {
+	const rawValue = process.env[name];
+	if (rawValue === undefined) {
+		return null;
+	}
+	const parsed = Number.parseInt(rawValue, 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) {
+		return null;
+	}
+	return parsed;
+}
+
+function getChatYAMLHardTimeoutMs(): number {
+	return (
+		readPositiveIntEnv(CHAT_YAML_HARD_TIMEOUT_MS_ENV) ??
+		DEFAULT_CHAT_YAML_HARD_TIMEOUT_MS
+	);
+}
+
+async function withRetries<T>(
+	operation: string,
+	fn: (attempt: number) => Promise<T>,
+): Promise<T> {
+	let lastError: unknown;
+
+	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+		try {
+			return await fn(attempt);
+		} catch (error) {
+			lastError = error;
+			if (isAbortError(error)) {
+				throw error;
+			}
+			if (attempt === MAX_RETRIES) {
+				break;
+			}
+
+			console.log(
+				`[LLM] ${operation} failed (attempt ${attempt}/${MAX_RETRIES}): ${toErrorMessage(error)}. Retrying...`,
+			);
+			await sleep(BASE_RETRY_DELAY_MS * attempt);
+		}
+	}
+
+	throw new Error(
+		`[LLM] ${operation} failed after ${MAX_RETRIES} attempts: ${toErrorMessage(lastError)}`,
+	);
+}
+
+/** Build a plain text user message */
+export function userMessage(content: string | ContentPart[]): Message {
+	return { role: "user", content };
+}
+
+/** Convert Message[] to a plain completion prompt */
+function toCompletionPrompt(messages: Message[]): string {
+	return messages
+		.map((m) => {
+			if (typeof m.content === "string") {
+				return `${m.role.toUpperCase()}:\n${m.content}`;
+			}
+			const contentText = m.content
+				.map((part) =>
+					part.type === "text" ? part.text : "[image omitted]",
+				)
+				.join("\n");
+			return `${m.role.toUpperCase()}:\n${contentText}`;
+		})
+		.join("\n\n");
+}
+
+function collectImageParts(messages: Message[]): Array<{
+	url: string;
+	detail?: "low" | "high" | "auto";
+}> {
+	const imageParts: Array<{ url: string; detail?: "low" | "high" | "auto" }> =
+		[];
+
+	for (const message of messages) {
+		if (!Array.isArray(message.content)) continue;
+		for (const part of message.content) {
+			if (part.type !== "image_url") continue;
+			imageParts.push({
+				url: part.image_url.url,
+				detail: part.image_url.detail || "auto",
+			});
+		}
+	}
+
+	return imageParts;
+}
+
+function isOmittedImageUrlForTokenCount(url: string): boolean {
+	const normalized = url.trim().toLowerCase();
+	return (
+		normalized === "(base64 omitted)" ||
+		normalized.includes("base64 omitted")
+	);
+}
+
+function buildOpenAIMultimodalInputFromParts(params: {
+	messages: Message[];
+	imageParts: Array<{ url: string; detail?: "low" | "high" | "auto" }>;
+}): unknown[] {
+	const prompt = toCompletionPrompt(params.messages);
+	const content: Array<
+		| { type: "input_text"; text: string }
+		| {
+				type: "input_image";
+				image_url: string;
+				detail?: "low" | "high" | "auto";
+		  }
+	> = [{ type: "input_text", text: prompt }];
+
+	for (const imagePart of params.imageParts) {
+		content.push({
+			type: "input_image",
+			image_url: imagePart.url,
+			detail: imagePart.detail,
+		});
+	}
+
+	return [{ role: "user", content }];
+}
+
+export async function countMessageTokens(
+	messages: Message[],
+	options: LLMOptions,
+): Promise<number> {
+	const imagePartsForTokenCount = collectImageParts(messages).filter(
+		(imagePart) => !isOmittedImageUrlForTokenCount(imagePart.url),
+	);
+	const input =
+		imagePartsForTokenCount.length > 0
+			? (buildOpenAIMultimodalInputFromParts({
+					messages,
+					imageParts: imagePartsForTokenCount,
+				}) as any)
+			: toCompletionPrompt(messages);
+	const model =
+		options.provider === "openai"
+			? options.model
+			: DEFAULT_OPENAI_TOKEN_COUNT_MODEL;
+
+	return withRetries(`countTokens:${options.provider}->openai`, async () => {
+		return await countInputTokensOpenAI({
+			model,
+			payload: input,
+		});
+	});
+}
+
+export async function chat(
+	messages: Message[],
+	options: LLMOptions,
+): Promise<string> {
+	const { provider, model } = options;
+	const completionPrompt = toCompletionPrompt(messages);
+
+	return withRetries(`chat:${provider}`, async () => {
+		const result = await runProviderChat({
+			options: { ...options, model },
+			prompt: completionPrompt,
+		});
+		return result.content;
+	});
+}
+
+/** Strip markdown code blocks from LLM response */
+function stripMarkdownCodeBlocks(content: string): string {
+	const match = content.match(/^```(?:ya?ml|json)?\s*\n?([\s\S]*?)\n?```$/);
+	if (match) {
+		return match[1].trim();
+	}
+	return content.trim();
+}
+
+/**
+ * If the response contains <yaml>, keep everything after that marker.
+ * If a legacy closing </yaml> exists, trim to its start.
+ * Otherwise return the original content unchanged.
+ */
+function extractYAMLTagContent(content: string): string {
+	const openTag = content.match(/<yaml\b[^>]*>/i);
+	if (!openTag || openTag.index === undefined) {
+		return content;
+	}
+
+	const afterOpenTag = content.slice(openTag.index + openTag[0].length);
+	const closeTagIndex = afterOpenTag.search(/<\/yaml>/i);
+	const extracted =
+		closeTagIndex >= 0
+			? afterOpenTag.slice(0, closeTagIndex)
+			: afterOpenTag;
+	return extracted.trim();
+}
+
+const YAML_TEXT_LIKE_SCALAR_KEYS = new Set([
+	"thinking",
+	"text",
+	"link",
+	"summary",
+	"downloaded_file_path",
+	"bid",
+	"type",
+	"url",
+	"script",
+	"reason",
+	"value",
+	"previousStepOutcome",
+	"currentStateObservation",
+	"nextActionRationale",
+]);
+
+const YAML_ADVISORY_STEP_CONTEXT_KEY_LIST = [
+	"previousStepStatus",
+	"previousStepOutcome",
+	"currentStateObservation",
+	"nextActionRationale",
+] as const;
+
+type AdvisoryStepContextKey =
+	(typeof YAML_ADVISORY_STEP_CONTEXT_KEY_LIST)[number];
+
+const YAML_ADVISORY_STEP_CONTEXT_KEYS = new Set<AdvisoryStepContextKey>(
+	YAML_ADVISORY_STEP_CONTEXT_KEY_LIST,
+);
+
+function repairUnquotedTextLikeYamlScalars(content: string): string {
+	let changed = false;
+	const repaired = content
+		.split("\n")
+		.map((line) => {
+			const match = line.match(
+				/^(\s*(?:-\s*)?)([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*?)\s*$/,
+			);
+			if (!match) {
+				return line;
+			}
+
+			const [, prefix, key, rawValue] = match;
+			if (!YAML_TEXT_LIKE_SCALAR_KEYS.has(key) || rawValue.length === 0) {
+				return line;
+			}
+			if (/^["'|>\[{]/.test(rawValue)) {
+				return line;
+			}
+
+			changed = true;
+			return `${prefix}${key}: ${JSON.stringify(rawValue)}`;
+		})
+		.join("\n");
+
+	return changed ? repaired : content;
+}
+
+function tryDecodeYamlScalarText(value: string): string {
+	const trimmed = value.trim();
+	if (trimmed.length === 0) {
+		return "";
+	}
+	if (
+		(trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+		(trimmed.startsWith("'") && trimmed.endsWith("'"))
+	) {
+		try {
+			const parsed = yaml.load(`v: ${trimmed}`) as { v?: unknown } | null;
+			if (parsed && typeof parsed.v === "string") {
+				return parsed.v.trim();
+			}
+		} catch {
+			// Fall back to the raw trimmed text below.
+		}
+	}
+	return trimmed;
+}
+
+function extractBlockScalarText(
+	lines: string[],
+	startIndex: number,
+): {
+	value: string;
+	nextIndex: number;
+} {
+	const collected: string[] = [];
+	let index = startIndex + 1;
+	while (index < lines.length) {
+		const line = lines[index] ?? "";
+		if (line.length === 0) {
+			collected.push("");
+			index += 1;
+			continue;
+		}
+		if (/^\s/.test(line)) {
+			collected.push(line.replace(/^\s+/, ""));
+			index += 1;
+			continue;
+		}
+		break;
+	}
+	return {
+		value: collected.join("\n").trim(),
+		nextIndex: index,
+	};
+}
+
+function stripAndSalvageAdvisoryStepContextFields(content: string): {
+	content: string;
+	salvaged: Partial<Record<AdvisoryStepContextKey, string>>;
+	changed: boolean;
+} {
+	const salvaged: Partial<Record<AdvisoryStepContextKey, string>> = {};
+	const output: string[] = [];
+	const lines = content.split("\n");
+	let changed = false;
+
+	for (let index = 0; index < lines.length;) {
+		const line = lines[index] ?? "";
+		const match = line.match(
+			/^(previousStepStatus|previousStepOutcome|currentStateObservation|nextActionRationale):\s*(.*)$/,
+		);
+		if (!match) {
+			output.push(line);
+			index += 1;
+			continue;
+		}
+
+		const key = match[1] as AdvisoryStepContextKey;
+		const rawValue = match[2] ?? "";
+		changed = true;
+
+		if (/^[|>][-+0-9\s]*$/.test(rawValue.trim())) {
+			const extracted = extractBlockScalarText(lines, index);
+			salvaged[key] = extracted.value;
+			index = extracted.nextIndex;
+			continue;
+		}
+
+		salvaged[key] = tryDecodeYamlScalarText(rawValue);
+		index += 1;
+		while (index < lines.length) {
+			const nextLine = lines[index] ?? "";
+			if (nextLine.length === 0) {
+				index += 1;
+				continue;
+			}
+			if (/^\s/.test(nextLine)) {
+				index += 1;
+				continue;
+			}
+			break;
+		}
+	}
+
+	return {
+		content: output.join("\n"),
+		salvaged,
+		changed,
+	};
+}
+
+function mergeSalvagedAdvisoryStepContextFields<T>(
+	parsed: T,
+	salvaged: Partial<Record<AdvisoryStepContextKey, string>>,
+): T {
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return parsed;
+	}
+	const target = parsed as Record<string, unknown>;
+	for (const key of YAML_ADVISORY_STEP_CONTEXT_KEY_LIST) {
+		if (target[key] !== undefined) {
+			continue;
+		}
+		const salvagedValue = salvaged[key];
+		if (salvagedValue === undefined) {
+			continue;
+		}
+		target[key] = salvagedValue;
+	}
+	return parsed;
+}
+
+export async function chatYAML<T>(
+	messages: Message[],
+	options: LLMOptions,
+	caller?: string,
+	onTrace?: (trace: ChatYAMLTraceEvent<T>) => void,
+	abortSignal?: AbortSignal,
+	onOutputChunk?: (chunk: string) => void,
+): Promise<ChatJSONResult<T>> {
+	const { provider, model } = options;
+	const completionPrompt = toCompletionPrompt(messages);
+
+	return withRetries(`chatYAML:${caller || "unknown"}`, async (attempt) => {
+		let content = "";
+		let usage: TokenUsage = {
+			input_tokens: 0,
+			output_tokens: 0,
+			total_tokens: 0,
+		};
+		let reasoning_tokens = "";
+		const attemptStartedAt = Date.now();
+		const generationStartedAt = Date.now();
+		const resolvedCaller = caller || "unknown";
+		if (provider === "vllm") {
+			console.log(
+				`[LLM][vllm] request_start caller=${resolvedCaller} attempt=${attempt} retry_count=${attempt - 1} model=${model}`,
+			);
+		}
+		const hardTimeoutMs = getChatYAMLHardTimeoutMs();
+		const abortController = new AbortController();
+		let hardTimedOut = false;
+		let externalAbortReject: ((error: ChatYAMLAbortError) => void) | null =
+			null;
+		const externalAbortPromise = new Promise<never>((_, reject) => {
+			externalAbortReject = reject;
+		});
+		const handleExternalAbort = () => {
+			abortController.abort(abortSignal?.reason);
+			externalAbortReject?.(new ChatYAMLAbortError(abortSignal?.reason));
+		};
+		if (abortSignal?.aborted) {
+			handleExternalAbort();
+		} else {
+			abortSignal?.addEventListener("abort", handleExternalAbort, {
+				once: true,
+			});
+		}
+
+		let rejectHardTimeout:
+			((error: ChatYAMLHardTimeoutError) => void) | null = null;
+		const hardTimeoutPromise = new Promise<never>((_, reject) => {
+			rejectHardTimeout = reject;
+		});
+		const hardTimeoutHandle: ReturnType<typeof setTimeout> = setTimeout(
+			() => {
+				hardTimedOut = true;
+				abortController.abort();
+				rejectHardTimeout?.(
+					new ChatYAMLHardTimeoutError({
+						provider,
+						caller: resolvedCaller,
+						attempt,
+						timeoutMs: hardTimeoutMs,
+					}),
+				);
+			},
+			hardTimeoutMs,
+		);
+		if (
+			typeof hardTimeoutHandle === "object" &&
+			hardTimeoutHandle !== null &&
+			"unref" in hardTimeoutHandle &&
+			typeof hardTimeoutHandle.unref === "function"
+		) {
+			hardTimeoutHandle.unref();
+		}
+
+		try {
+			await Promise.race([
+				(async () => {
+					({ content, usage, reasoning_tokens } =
+						await runProviderChat({
+							options: { ...options, model },
+							prompt: completionPrompt,
+							abortSignal: abortController.signal,
+							onOutputChunk,
+						}));
+				})(),
+				hardTimeoutPromise,
+				externalAbortPromise,
+			]);
+		} catch (error) {
+			onTrace?.({
+				caller: resolvedCaller,
+				provider,
+				model,
+				attempt,
+				messages,
+				raw_response: content || undefined,
+				usage,
+				reasoning_tokens,
+				error: toErrorMessage(error),
+			});
+			if (hardTimedOut) {
+				throw error;
+			}
+			if (isAbortError(error)) {
+				throw error;
+			}
+			if (provider === "vllm") {
+				console.log(
+					`[LLM][vllm] request_failed caller=${resolvedCaller} attempt=${attempt} retry_count=${attempt - 1} latency_ms=${Date.now() - attemptStartedAt} error=${toErrorMessage(error)}`,
+				);
+			}
+			throw error;
+		} finally {
+			clearTimeout(hardTimeoutHandle);
+			abortSignal?.removeEventListener("abort", handleExternalAbort);
+			if (hardTimedOut) {
+				abortController.abort();
+			}
+		}
+
+		const generationTimeMs = Date.now() - generationStartedAt;
+		usage.generation_time_ms = generationTimeMs;
+		if (provider === "vllm") {
+			console.log(
+				`[LLM][vllm] request_end caller=${resolvedCaller} attempt=${attempt} retry_count=${attempt - 1} latency_ms=${Date.now() - attemptStartedAt} total_tokens=${usage.total_tokens} input_tokens=${usage.input_tokens} output_tokens=${usage.output_tokens}`,
+			);
+		}
+
+		const contentWithExtractedYAML = extractYAMLTagContent(content);
+		const cleanContent = stripMarkdownCodeBlocks(contentWithExtractedYAML);
+
+		try {
+			const parsed = yaml.load(cleanContent);
+			if (
+				parsed === null ||
+				parsed === undefined ||
+				typeof parsed !== "object" ||
+				Array.isArray(parsed)
+			) {
+				throw new Error(
+					`Expected a YAML object, got ${parsed === null ? "null" : Array.isArray(parsed) ? "array" : typeof parsed}`,
+				);
+			}
+			onTrace?.({
+				caller: resolvedCaller,
+				provider,
+				model,
+				attempt,
+				messages,
+				output: parsed as T,
+				raw_response: cleanContent,
+				usage,
+				reasoning_tokens,
+			});
+			return {
+				data: parsed as T,
+				usage,
+				reasoning_tokens,
+			};
+		} catch (e) {
+			const repairedContent =
+				repairUnquotedTextLikeYamlScalars(cleanContent);
+			if (repairedContent !== cleanContent) {
+				try {
+					const repairedParsed = yaml.load(repairedContent);
+					if (
+						repairedParsed !== null &&
+						repairedParsed !== undefined &&
+						typeof repairedParsed === "object" &&
+						!Array.isArray(repairedParsed)
+					) {
+						onTrace?.({
+							caller: resolvedCaller,
+							provider,
+							model,
+							attempt,
+							messages,
+							output: repairedParsed as T,
+							raw_response: repairedContent,
+							usage,
+							reasoning_tokens,
+						});
+						return {
+							data: repairedParsed as T,
+							usage,
+							reasoning_tokens,
+						};
+					}
+				} catch {
+					// Fall through to the original parse error below.
+				}
+			}
+
+			const strippedSummaryFields =
+				stripAndSalvageAdvisoryStepContextFields(cleanContent);
+			if (strippedSummaryFields.changed) {
+				try {
+					const strippedParsed = yaml.load(
+						strippedSummaryFields.content,
+					);
+					if (
+						strippedParsed !== null &&
+						strippedParsed !== undefined &&
+						typeof strippedParsed === "object" &&
+						!Array.isArray(strippedParsed)
+					) {
+						const mergedParsed =
+							mergeSalvagedAdvisoryStepContextFields(
+								strippedParsed as T,
+								strippedSummaryFields.salvaged,
+							);
+						onTrace?.({
+							caller: resolvedCaller,
+							provider,
+							model,
+							attempt,
+							messages,
+							output: mergedParsed,
+							raw_response: cleanContent,
+							usage,
+							reasoning_tokens,
+						});
+						return {
+							data: mergedParsed,
+							usage,
+							reasoning_tokens,
+						};
+					}
+				} catch {
+					// Fall through to the original parse error below.
+				}
+			}
+
+			const location = caller || "unknown";
+			const preview = cleanContent;
+			onTrace?.({
+				caller: resolvedCaller,
+				provider,
+				model,
+				attempt,
+				messages,
+				raw_response: cleanContent,
+				usage,
+				reasoning_tokens,
+				error: `YAML parse error in ${location}: ${(e as Error).message}`,
+			});
+			throw new Error(
+				`YAML parse error in ${location}: ${(e as Error).message}\nRaw response: ${preview}...`,
+			);
+		}
+	});
+}

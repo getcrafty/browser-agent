@@ -1,0 +1,25 @@
+{
+	"name": "crafty-browser-agent-linux-x64",
+	"version": "0.1.4",
+	"description": "Crafty Browser Agent executable for Linux x64 (glibc)",
+	"license": "MIT",
+	"os": [
+		"linux"
+	],
+	"cpu": [
+		"x64"
+	],
+	"libc": [
+		"glibc"
+	],
+	"files": [
+		"bin"
+	],
+	"scripts": {
+		"prepack": "node ../../../../scripts/check-sdk-binary.mjs typescript linux-x64"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	}
+}
