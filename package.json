@@ -1,6 +1,6 @@
 {
 	"name": "browser-agent",
-	"version": "1.0.4",
+	"version": "1.0.5",
 	"repository": "https://github.com/getcrafty/browser-agent",
 	"license": "MIT",
 	"type": "module",

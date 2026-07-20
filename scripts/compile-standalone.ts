@@ -271,6 +271,40 @@ const result = await Bun.build({
 			},
 		},
 		{
+			name: "embed-tesseract-core",
+			setup(build) {
+				build.onLoad(
+					{
+						filter: /tesseract\.js[\\/]src[\\/]worker-script[\\/]node[\\/]getCore\.js$/,
+					},
+					async ({ path: filename }) => {
+						let source = await Bun.file(filename).text();
+						const coreModules = [
+							"tesseract-core-relaxedsimd-lstm",
+							"tesseract-core-relaxedsimd",
+							"tesseract-core-simd-lstm",
+							"tesseract-core-simd",
+							"tesseract-core-lstm",
+							"tesseract-core",
+						];
+						for (const coreModule of coreModules) {
+							const original = `require('tesseract.js-core/${coreModule}')`;
+							if (!source.includes(original)) {
+								throw new Error(
+									`Unable to patch Tesseract core module ${coreModule}.`,
+								);
+							}
+							source = source.replace(
+								original,
+								`require('tesseract.js-core/${coreModule}.wasm.js')`,
+							);
+						}
+						return { contents: source, loader: "js" };
+					},
+				);
+			},
+		},
+		{
 			name: "disable-jsdom-sync-xhr",
 			setup(build) {
 				build.onLoad(

@@ -30,6 +30,38 @@ assert.equal(
 	false,
 	"The standalone executable must not retain jsdom's build-time worker path",
 );
+for (const tesseractCore of [
+	"tesseract-core-relaxedsimd-lstm.wasm",
+	"tesseract-core-relaxedsimd.wasm",
+	"tesseract-core-simd-lstm.wasm",
+	"tesseract-core-simd.wasm",
+	"tesseract-core-lstm.wasm",
+	"tesseract-core.wasm",
+]) {
+	const tesseractCorePath = path.join(
+		root,
+		"node_modules",
+		"tesseract.js-core",
+		tesseractCore,
+	);
+	let match = executableContents.indexOf(Buffer.from(tesseractCorePath));
+	let containsExternalCorePath = false;
+	while (match !== -1) {
+		if (executableContents[match + tesseractCorePath.length] !== 46) {
+			containsExternalCorePath = true;
+			break;
+		}
+		match = executableContents.indexOf(
+			Buffer.from(tesseractCorePath),
+			match + tesseractCorePath.length,
+		);
+	}
+	assert.equal(
+		containsExternalCorePath,
+		false,
+		`The standalone executable must not retain Tesseract's build-time path for ${tesseractCore}`,
+	);
+}
 const isolatedDirectory = fs.mkdtempSync(
 	path.join(os.tmpdir(), "browser-agent-standalone-smoke-"),
 );
