@@ -41,8 +41,9 @@ const targets = [
 
 await rm(path.dirname(temporary), { recursive: true, force: true });
 await mkdir(path.dirname(temporary), { recursive: true });
+const bunExecutable = path.join(root, "node_modules", "bun", "bin", "bun.exe");
 const result = spawnSync(
-	path.join(root, "node_modules", ".bin", `bun${suffix}`),
+	bunExecutable,
 	[
 		path.join(root, "scripts", "compile-standalone.ts"),
 		path.join(root, "src", "standalone-cli.ts"),
@@ -51,6 +52,11 @@ const result = spawnSync(
 	],
 	{ cwd: root, encoding: "utf8", stdio: "inherit" },
 );
+if (result.error) {
+	throw new Error(`Unable to start Bun: ${result.error.message}`, {
+		cause: result.error,
+	});
+}
 if (result.status !== 0) {
 	throw new Error(
 		`Standalone browser-agent build failed with status ${result.status}.`,
