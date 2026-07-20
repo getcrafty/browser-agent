@@ -21,7 +21,7 @@ export const SDK_PLATFORMS = [
 		nodeArchitecture: "arm64",
 		asset: "browser-agent-linux-arm64",
 		archive: "browser-agent-linux-arm64.tar.gz",
-		wheelTag: "linux_aarch64",
+		wheelTag: "manylinux_2_35_aarch64",
 	},
 	{
 		key: "linux-x64",
@@ -29,7 +29,7 @@ export const SDK_PLATFORMS = [
 		nodeArchitecture: "x64",
 		asset: "browser-agent-linux-x64",
 		archive: "browser-agent-linux-x64.tar.gz",
-		wheelTag: "linux_x86_64",
+		wheelTag: "manylinux_2_35_x86_64",
 	},
 	{
 		key: "win32-arm64",

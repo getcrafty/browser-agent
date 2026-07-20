@@ -118,7 +118,7 @@ class CustomBuildHook(BuildHookInterface):
         }.get(architecture, architecture)
         default_platform = {
             "darwin": f"macosx_13_0_{wheel_architecture}",
-            "linux": f"linux_{wheel_architecture}",
+            "linux": f"manylinux_2_35_{wheel_architecture}",
             "win32": f"win_{wheel_architecture}",
         }.get(target_system)
         if default_platform is None:

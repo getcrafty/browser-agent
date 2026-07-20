@@ -512,11 +512,11 @@ jobs:
                     - platform: linux-arm64
                       runner: ubuntu-22.04-arm
                       executable_suffix: ""
-                      wheel_tag: linux_aarch64
+                      wheel_tag: manylinux_2_35_aarch64
                     - platform: linux-x64
                       runner: ubuntu-22.04
                       executable_suffix: ""
-                      wheel_tag: linux_x86_64
+                      wheel_tag: manylinux_2_35_x86_64
                     - platform: win32-arm64
                       runner: windows-11-arm
                       executable_suffix: .exe
