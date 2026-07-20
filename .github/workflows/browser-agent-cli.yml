@@ -40,7 +40,15 @@ jobs:
                   set -euo pipefail
 
                   version="$(node -p "require('./package.json').version")"
+                  source_version="$(
+                    sed -n 's/^export const BROWSER_AGENT_VERSION = "\(.*\)";$/\1/p' \
+                      src/version.ts
+                  )"
                   tag="browser-agent-cli-v$version"
+                  if [[ "$source_version" != "$version" ]]; then
+                    echo "::error::src/version.ts reports $source_version, but package.json reports $version."
+                    exit 1
+                  fi
                   if [[ "$GITHUB_REF" == refs/tags/browser-agent-cli-v* && "$GITHUB_REF_NAME" != "$tag" ]]; then
                     echo "::error::Tag $GITHUB_REF_NAME does not match package version $version (expected $tag)."
                     exit 1
