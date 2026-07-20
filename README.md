@@ -13,8 +13,8 @@
 
   <p>
     <a href="https://getcrafty.io"><img src="https://img.shields.io/badge/Crafty-getcrafty.io-ffbf00?style=for-the-badge" alt="Crafty website"></a>
-    <a href="#typescript"><img src="https://img.shields.io/badge/TypeScript-SDK-3178c6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript SDK"></a>
-    <a href="#python"><img src="https://img.shields.io/badge/Python-SDK-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python SDK"></a>
+    <a href="https://www.npmjs.com/package/crafty-browser-agent"><img src="https://img.shields.io/badge/TypeScript-SDK-3178c6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript SDK"></a>
+    <a href="https://pypi.org/project/browser-agent-python-sdk/"><img src="https://img.shields.io/badge/Python-SDK-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python SDK"></a>
     <a href="./LICENSE.md"><img src="https://img.shields.io/badge/License-MIT-black?style=for-the-badge" alt="MIT License"></a>
   </p>
 </div>
