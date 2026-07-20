@@ -10,7 +10,9 @@ if (!entrypoint || !outfile || !platform) {
 const root = path.resolve(import.meta.dirname, "..");
 const canvasPlatform = platform.startsWith("linux-")
 	? `${platform}-gnu`
-	: platform;
+	: platform.startsWith("win32-")
+		? `${platform}-msvc`
+		: platform;
 const canvasEntrypoint = Bun.resolveSync("@napi-rs/canvas", root);
 const canvasNativePackage = path.join(
 	root,
@@ -26,6 +28,16 @@ if (!canvasNative) {
 	throw new Error(`Unable to locate canvas binding for ${platform}.`);
 }
 const canvasBase64 = fs.readFileSync(canvasNative).toString("base64");
+const embeddedCanvasSidecars = fs
+	.readdirSync(canvasNativePackage)
+	.map((name) => path.join(canvasNativePackage, name))
+	.filter(
+		(filename) => filename.endsWith(".dat") || filename.endsWith(".dll"),
+	)
+	.map((filename) => ({
+		name: path.basename(filename),
+		base64: fs.readFileSync(filename).toString("base64"),
+	}));
 const languageBase64 = fs
 	.readFileSync(
 		path.join(
@@ -49,6 +61,13 @@ if (!process.argv.includes("--version-json")) {
 	const directory = fs.mkdtempSync(path.join(os.tmpdir(), "browser-agent-canvas-"));
 	const addon = path.join(directory, ${JSON.stringify(path.basename(canvasNative))});
 	fs.writeFileSync(addon, Buffer.from(${JSON.stringify(canvasBase64)}, "base64"));
+	const canvasSidecars = ${JSON.stringify(embeddedCanvasSidecars)};
+	for (const sidecar of canvasSidecars) {
+		fs.writeFileSync(
+			path.join(directory, sidecar.name),
+			Buffer.from(sidecar.base64, "base64"),
+		);
+	}
 	process.env.NAPI_RS_NATIVE_LIBRARY_PATH = addon;
 	const canvas = require(addon);
 	const { DOMMatrix, DOMPoint, DOMRect } = require(${JSON.stringify(
@@ -98,29 +117,58 @@ await import(${JSON.stringify(entrypoint)});
 `,
 );
 const addon = Bun.resolveSync(`@img/sharp-${platform}/sharp.node`, root);
-const vipsModule = Bun.resolveSync(`@img/sharp-libvips-${platform}/lib`, root);
-const vips = fs
-	.readdirSync(path.dirname(vipsModule))
-	.map((name) => path.join(path.dirname(vipsModule), name))
-	.find((filename) => /libvips-cpp/.test(filename));
-if (!vips) throw new Error(`Unable to locate libvips for ${platform}.`);
+const isWindows = platform.startsWith("win32-");
+let sharpLibraryDirectory: string;
+let sharpLibraries: string[];
+if (isWindows) {
+	sharpLibraryDirectory = path.dirname(addon);
+	sharpLibraries = fs
+		.readdirSync(sharpLibraryDirectory)
+		.filter((name) => name.endsWith(".dll"))
+		.map((name) => path.join(sharpLibraryDirectory, name));
+	if (sharpLibraries.length === 0) {
+		throw new Error(`Unable to locate Sharp DLLs for ${platform}.`);
+	}
+} else {
+	const vipsModule = Bun.resolveSync(
+		`@img/sharp-libvips-${platform}/lib`,
+		root,
+	);
+	sharpLibraryDirectory = path.dirname(vipsModule);
+	const vips = fs
+		.readdirSync(sharpLibraryDirectory)
+		.map((name) => path.join(sharpLibraryDirectory, name))
+		.find((filename) => /libvips-cpp/.test(filename));
+	if (!vips) throw new Error(`Unable to locate libvips for ${platform}.`);
+	sharpLibraries = [vips];
+}
 const addonBase64 = fs.readFileSync(addon).toString("base64");
-const vipsBase64 = fs.readFileSync(vips).toString("base64");
+const embeddedSharpLibraries = sharpLibraries.map((filename) => ({
+	name: path.basename(filename),
+	base64: fs.readFileSync(filename).toString("base64"),
+}));
 const embeddedSharp = `
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "browser-agent-sharp-"));
 const addonDirectory = path.join(root, "node_modules/@img/sharp-${platform}/lib");
-const vipsDirectory = path.join(root, "node_modules/@img/sharp-libvips-${platform}/lib");
+const libraryDirectory = path.join(root, ${JSON.stringify(
+	isWindows
+		? `node_modules/@img/sharp-${platform}/lib`
+		: `node_modules/@img/sharp-libvips-${platform}/lib`,
+)});
 fs.mkdirSync(addonDirectory, { recursive: true });
-fs.mkdirSync(vipsDirectory, { recursive: true });
+fs.mkdirSync(libraryDirectory, { recursive: true });
 const addon = path.join(addonDirectory, ${JSON.stringify(path.basename(addon))});
 fs.writeFileSync(addon, Buffer.from(${JSON.stringify(addonBase64)}, "base64"));
-fs.writeFileSync(
-	path.join(vipsDirectory, ${JSON.stringify(path.basename(vips))}),
-	Buffer.from(${JSON.stringify(vipsBase64)}, "base64"),
-);
+const libraries = ${JSON.stringify(embeddedSharpLibraries)};
+for (const library of libraries) {
+	fs.writeFileSync(
+		path.join(libraryDirectory, library.name),
+		Buffer.from(library.base64, "base64"),
+	);
+}
 process.once("exit", () => fs.rmSync(root, { recursive: true, force: true }));
 module.exports = require(addon);
 `;
