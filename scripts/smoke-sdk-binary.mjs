@@ -15,51 +15,16 @@ const packageVersion = JSON.parse(
 	fs.readFileSync(path.join(root, "package.json"), "utf8"),
 ).version;
 const executableContents = fs.readFileSync(executable);
-const jsdomWorkerPath = path.join(
+const buildRootVariants = new Set([
 	root,
-	"node_modules",
-	"jsdom",
-	"lib",
-	"jsdom",
-	"living",
-	"xhr",
-	"xhr-sync-worker.js",
-);
-assert.equal(
-	executableContents.includes(Buffer.from(jsdomWorkerPath)),
-	false,
-	"The standalone executable must not retain jsdom's build-time worker path",
-);
-for (const tesseractCore of [
-	"tesseract-core-relaxedsimd-lstm.wasm",
-	"tesseract-core-relaxedsimd.wasm",
-	"tesseract-core-simd-lstm.wasm",
-	"tesseract-core-simd.wasm",
-	"tesseract-core-lstm.wasm",
-	"tesseract-core.wasm",
-]) {
-	const tesseractCorePath = path.join(
-		root,
-		"node_modules",
-		"tesseract.js-core",
-		tesseractCore,
-	);
-	let match = executableContents.indexOf(Buffer.from(tesseractCorePath));
-	let containsExternalCorePath = false;
-	while (match !== -1) {
-		if (executableContents[match + tesseractCorePath.length] !== 46) {
-			containsExternalCorePath = true;
-			break;
-		}
-		match = executableContents.indexOf(
-			Buffer.from(tesseractCorePath),
-			match + tesseractCorePath.length,
-		);
-	}
+	root.split(path.sep).join("/"),
+	root.split(path.sep).join("\\"),
+]);
+for (const buildRoot of buildRootVariants) {
 	assert.equal(
-		containsExternalCorePath,
+		executableContents.includes(Buffer.from(buildRoot)),
 		false,
-		`The standalone executable must not retain Tesseract's build-time path for ${tesseractCore}`,
+		`The standalone executable must not retain its build root: ${buildRoot}`,
 	);
 }
 const isolatedDirectory = fs.mkdtempSync(
@@ -119,6 +84,7 @@ assert.equal(selfTest.status, 0, selfTest.stderr);
 assert.deepEqual(JSON.parse(selfTest.stdout), {
 	sharp: true,
 	tesseract: true,
+	tiktoken: true,
 	pdf: true,
 	docx: true,
 	xlsx: true,

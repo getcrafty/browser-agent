@@ -50,6 +50,11 @@ const languageBase64 = fs
 		),
 	)
 	.toString("base64");
+const tiktokenWasmBase64 = fs
+	.readFileSync(
+		path.join(root, "node_modules", "tiktoken", "tiktoken_bg.wasm"),
+	)
+	.toString("base64");
 const tesseractWorkerEntrypoint = path.join(
 	root,
 	"node_modules",
@@ -214,6 +219,22 @@ if (process.platform !== "win32") {
 }
 module.exports = require(addon);
 `;
+const embeddedTiktoken = `
+'use strict';
+const wasm = require('./tiktoken_bg.cjs');
+const bytes = Buffer.from(${JSON.stringify(tiktokenWasmBase64)}, 'base64');
+const wasmModule = new WebAssembly.Module(bytes);
+const wasmInstance = new WebAssembly.Instance(wasmModule, {
+	'./tiktoken_bg.js': wasm,
+});
+wasm.__wbg_set_wasm(wasmInstance.exports);
+module.exports = {
+	get_encoding: wasm.get_encoding,
+	encoding_for_model: wasm.encoding_for_model,
+	get_encoding_name_for_model: wasm.get_encoding_name_for_model,
+	Tiktoken: wasm.Tiktoken,
+};
+`;
 
 const result = await Bun.build({
 	entrypoints: [wrapper, canvasEntrypoint, tesseractWorkerWrapper],
@@ -271,8 +292,32 @@ const result = await Bun.build({
 			},
 		},
 		{
+			name: "embed-tiktoken-wasm",
+			setup(build) {
+				build.onLoad(
+					{ filter: /tiktoken[\\/]tiktoken\.cjs$/ },
+					() => ({
+						contents: embeddedTiktoken,
+						loader: "js",
+					}),
+				);
+			},
+		},
+		{
 			name: "embed-tesseract-core",
 			setup(build) {
+				build.onLoad(
+					{
+						filter: /tesseract\.js[\\/]src[\\/]worker[\\/]node[\\/]defaultOptions\.js$/,
+					},
+					() => ({
+						contents: `
+'use strict';
+module.exports = require('../../constants/defaultOptions');
+`,
+						loader: "js",
+					}),
+				);
 				build.onLoad(
 					{
 						filter: /tesseract\.js[\\/]src[\\/]worker-script[\\/]node[\\/]getCore\.js$/,
@@ -302,6 +347,28 @@ module.exports = async (_, __, res) => {
 	return TesseractCore;
 };
 `,
+							loader: "js",
+						};
+					},
+				);
+				build.onLoad(
+					{
+						filter: /tesseract\.js-core[\\/]tesseract-core-simd-lstm\.wasm\.js$/,
+					},
+					async ({ path: filename }) => {
+						const source = await Bun.file(filename).text();
+						const buildFilenameSetup =
+							'"undefined"!=typeof __filename?_scriptName=__filename:ba&&(_scriptName=self.location.href);';
+						if (!source.includes(buildFilenameSetup)) {
+							throw new Error(
+								"Unable to remove the Tesseract core build-time filename.",
+							);
+						}
+						return {
+							contents: source.replace(
+								buildFilenameSetup,
+								"ba&&(_scriptName=self.location.href);",
+							),
 							loader: "js",
 						};
 					},

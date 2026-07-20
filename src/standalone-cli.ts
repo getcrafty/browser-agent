@@ -173,10 +173,16 @@ if (process.argv.includes("--version-json")) {
 		if (!xlsx.content.includes("Ada") || !xlsx.content.includes("10")) {
 			throw new Error("XLSX self-test failed");
 		}
+		const { estimateTokenCount } =
+			await import("./agents/executor-utils/step-context.js");
+		if (estimateTokenCount("hello world") !== 2) {
+			throw new Error("Tiktoken self-test failed");
+		}
 		process.stdout.write(
 			`${JSON.stringify({
 				sharp: true,
 				tesseract: true,
+				tiktoken: true,
 				pdf: true,
 				docx: true,
 				xlsx: true,

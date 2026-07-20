@@ -23,6 +23,7 @@ if (process.argv.includes("--sdk-self-test-json")) {
 		`${JSON.stringify({
 			sharp: true,
 			tesseract: true,
+			tiktoken: true,
 			pdf: true,
 			docx: true,
 			xlsx: true,

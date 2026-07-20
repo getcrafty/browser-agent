@@ -104,6 +104,7 @@ def main() -> None:
         expected = {
             "sharp": True,
             "tesseract": True,
+            "tiktoken": True,
             "pdf": True,
             "docx": True,
             "xlsx": True,

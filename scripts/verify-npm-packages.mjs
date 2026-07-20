@@ -77,6 +77,7 @@ try {
 	assert.deepEqual(JSON.parse(selfTest.stdout), {
 		sharp: true,
 		tesseract: true,
+		tiktoken: true,
 		pdf: true,
 		docx: true,
 		xlsx: true,
