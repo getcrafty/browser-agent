@@ -1,10 +1,6 @@
 # Browser Agent TypeScript SDK
 
-Dependency-free TypeScript wrapper for the Crafty Browser Agent executable.
-
-The installer downloads the exact-version executable for macOS, Linux (glibc),
-or Windows on ARM64 or x64 from the matching GitHub Release and verifies its
-SHA-256 checksum. npm lifecycle scripts must be enabled during installation.
+TypeScript SDK for [Crafty's Browser Agent cli](https://github.com/getcrafty/browser-agent).
 
 ## Getting started
 
