@@ -1,6 +1,6 @@
 {
 	"name": "@getcrafty/browser-agent",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"description": "TypeScript SDK for the Crafty Browser Agent",
 	"keywords": [
 		"ai",

@@ -14,6 +14,22 @@ const executable = process.argv[2]
 const packageVersion = JSON.parse(
 	fs.readFileSync(path.join(root, "package.json"), "utf8"),
 ).version;
+const executableContents = fs.readFileSync(executable);
+const jsdomWorkerPath = path.join(
+	root,
+	"node_modules",
+	"jsdom",
+	"lib",
+	"jsdom",
+	"living",
+	"xhr",
+	"xhr-sync-worker.js",
+);
+assert.equal(
+	executableContents.includes(Buffer.from(jsdomWorkerPath)),
+	false,
+	"The standalone executable must not retain jsdom's build-time worker path",
+);
 const isolatedDirectory = fs.mkdtempSync(
 	path.join(os.tmpdir(), "browser-agent-standalone-smoke-"),
 );

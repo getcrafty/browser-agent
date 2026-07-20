@@ -270,6 +270,41 @@ const result = await Bun.build({
 				);
 			},
 		},
+		{
+			name: "disable-jsdom-sync-xhr",
+			setup(build) {
+				build.onLoad(
+					{
+						filter: /jsdom[\\/]lib[\\/]jsdom[\\/]living[\\/]xhr[\\/]XMLHttpRequest-impl\.js$/,
+					},
+					async ({ path: filename }) => {
+						let source = await Bun.file(filename).text();
+						const workerResolution =
+							'const syncWorkerFile = require.resolve ? require.resolve("./xhr-sync-worker.js") : null;';
+						const synchronousRequest =
+							"    if (flag.synchronous) {\n      const flagStr";
+						if (
+							!source.includes(workerResolution) ||
+							!source.includes(synchronousRequest)
+						) {
+							throw new Error(
+								"Unable to patch jsdom synchronous XMLHttpRequest.",
+							);
+						}
+						source = source
+							.replace(
+								workerResolution,
+								"const syncWorkerFile = null;",
+							)
+							.replace(
+								synchronousRequest,
+								'    if (flag.synchronous) {\n      throw new Error("Synchronous XMLHttpRequest is not supported in standalone browser-agent builds.");\n      const flagStr',
+							);
+						return { contents: source, loader: "js" };
+					},
+				);
+			},
+		},
 	],
 });
 
