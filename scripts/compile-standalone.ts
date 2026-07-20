@@ -278,28 +278,32 @@ const result = await Bun.build({
 						filter: /tesseract\.js[\\/]src[\\/]worker-script[\\/]node[\\/]getCore\.js$/,
 					},
 					async ({ path: filename }) => {
-						let source = await Bun.file(filename).text();
-						const coreModules = [
-							"tesseract-core-relaxedsimd-lstm",
-							"tesseract-core-relaxedsimd",
-							"tesseract-core-simd-lstm",
-							"tesseract-core-simd",
-							"tesseract-core-lstm",
-							"tesseract-core",
-						];
-						for (const coreModule of coreModules) {
-							const original = `require('tesseract.js-core/${coreModule}')`;
-							if (!source.includes(original)) {
-								throw new Error(
-									`Unable to patch Tesseract core module ${coreModule}.`,
-								);
-							}
-							source = source.replace(
-								original,
-								`require('tesseract.js-core/${coreModule}.wasm.js')`,
+						const source = await Bun.file(filename).text();
+						if (
+							!source.includes(
+								"require('tesseract.js-core/tesseract-core-simd-lstm')",
+							)
+						) {
+							throw new Error(
+								"Unable to patch the Tesseract SIMD LSTM core module.",
 							);
 						}
-						return { contents: source, loader: "js" };
+						return {
+							contents: `
+'use strict';
+let TesseractCore = null;
+module.exports = async (_, __, res) => {
+	if (TesseractCore === null) {
+		const statusText = 'loading tesseract core';
+		res.progress({ status: statusText, progress: 0 });
+		TesseractCore = require('tesseract.js-core/tesseract-core-simd-lstm.wasm.js');
+		res.progress({ status: statusText, progress: 1 });
+	}
+	return TesseractCore;
+};
+`,
+							loader: "js",
+						};
 					},
 				);
 			},

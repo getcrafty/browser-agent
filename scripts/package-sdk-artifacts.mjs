@@ -125,6 +125,13 @@ const wheels = fs
 	.readdirSync(pythonOutput)
 	.filter((name) => name.endsWith(".whl"));
 assert.equal(wheels.length, SDK_PLATFORMS.length);
+const pypiFileSizeLimit = 100 * 1024 * 1024;
+for (const wheel of wheels) {
+	assert(
+		fs.statSync(path.join(pythonOutput, wheel)).size <= pypiFileSizeLimit,
+		`${wheel} exceeds PyPI's 100 MiB file-size limit`,
+	);
+}
 for (const target of SDK_PLATFORMS) {
 	const wheel = wheels.find((name) =>
 		name.endsWith(`-${target.wheelTag}.whl`),

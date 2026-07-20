@@ -680,7 +680,7 @@ jobs:
 
             - name: Publish npm package
               if: steps.npm-release.outputs.publish == 'true'
-              run: npm publish dist/*.tgz --access public
+              run: npm publish ./dist/*.tgz --access public
 
     publish-pypi:
         name: Publish browser-agent-python-sdk
