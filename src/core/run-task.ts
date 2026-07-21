@@ -6,6 +6,7 @@ import type {
 	StageModelInvocationTrace,
 	StepTokenUsage,
 	SuccessVerificationResult,
+	TokenUsage,
 } from "../agents/types.js";
 import { buildRunTaskScopedFileRoots } from "./run-task-file-roots.js";
 import { runAgent } from "./run-agent.js";
@@ -16,6 +17,9 @@ import type {
 	RunTaskResult,
 	RunTaskRunResult,
 	StepRuntimeMetrics,
+	TokenUsageArtifactAttempt,
+	TokenUsageArtifactInvocation,
+	TokenUsageTotals,
 } from "./types.js";
 import { findTaskExecutionOverride } from "./task-execution-overrides.js";
 
@@ -153,6 +157,199 @@ export function buildExtractionStepUsage(params: {
 	return extractionStepUsage;
 }
 
+function copyTokenUsage(usage: TokenUsage | StepTokenUsage): TokenUsage {
+	const copied: TokenUsage = {
+		input_tokens: usage.input_tokens,
+		output_tokens: usage.output_tokens,
+		total_tokens: usage.total_tokens,
+	};
+	if (typeof usage.cached_input_tokens === "number") {
+		copied.cached_input_tokens = usage.cached_input_tokens;
+	}
+	if (typeof usage.reasoning_tokens === "number") {
+		copied.reasoning_tokens = usage.reasoning_tokens;
+	}
+	if (typeof usage.non_reasoning_output_tokens === "number") {
+		copied.non_reasoning_output_tokens =
+			usage.non_reasoning_output_tokens;
+	}
+	if (
+		"time_to_first_token_ms" in usage &&
+		typeof usage.time_to_first_token_ms === "number"
+	) {
+		copied.time_to_first_token_ms = usage.time_to_first_token_ms;
+	}
+	if (
+		"generation_time_ms" in usage &&
+		typeof usage.generation_time_ms === "number"
+	) {
+		copied.generation_time_ms = usage.generation_time_ms;
+	}
+	return copied;
+}
+
+export function sumTokenUsageInvocations(
+	invocations: TokenUsageArtifactInvocation[],
+): TokenUsageTotals {
+	return invocations.reduce<TokenUsageTotals>(
+		(totals, invocation) => {
+			const usage = invocation.usage;
+			if (!usage) return totals;
+			const hasOutputBreakdown =
+				"reasoning_tokens" in usage ||
+				"non_reasoning_output_tokens" in usage;
+			totals.input_tokens += usage.input_tokens;
+			totals.cached_input_tokens += usage.cached_input_tokens ?? 0;
+			totals.reasoning_tokens += usage.reasoning_tokens ?? 0;
+			totals.non_reasoning_output_tokens += hasOutputBreakdown
+				? (usage.non_reasoning_output_tokens ?? 0)
+				: usage.output_tokens;
+			totals.output_tokens += usage.output_tokens;
+			totals.total_tokens += usage.total_tokens;
+			totals.generation_time_ms += usage.generation_time_ms ?? 0;
+			return totals;
+		},
+		{
+			input_tokens: 0,
+			cached_input_tokens: 0,
+			reasoning_tokens: 0,
+			non_reasoning_output_tokens: 0,
+			output_tokens: 0,
+			total_tokens: 0,
+			generation_time_ms: 0,
+		},
+	);
+}
+
+function getTokenUsageStagePhase(
+	trace: StageModelInvocationTrace,
+): TokenUsageArtifactInvocation["phase"] {
+	if (trace.stage === "verifySuccess") return "verification";
+	if (
+		PREPROCESS_RECAP_STAGES.has(trace.stage) ||
+		(trace.stage === "createPlan" &&
+			trace.meta?.phase === "initial_plan")
+	) {
+		return "preprocess";
+	}
+	if (
+		trace.stage === "dataExtraction" ||
+		(trace.stage === "createPlan" && trace.meta?.phase === "replan") ||
+		typeof trace.meta?.step === "number" ||
+		typeof trace.meta?.stepNumber === "number"
+	) {
+		return "executor";
+	}
+	return "other";
+}
+
+export function buildTokenUsageArtifactAttempt(params: {
+	runIndex: number;
+	retryAttempt: number;
+	completed: boolean;
+	successful: boolean;
+	stepTokenUsage: StepTokenUsage[];
+	mainLoopEntries: MainLoopStepEntry[];
+	modelInvocations: StageModelInvocationTrace[];
+	runAgentProvider: RunTaskInput["stageLLMs"]["runAgent"]["provider"];
+	runAgentModel: string;
+}): TokenUsageArtifactAttempt {
+	const recapStepByExecutorStep = new Map<number, number>();
+	let executorStep = 0;
+	for (const entry of params.mainLoopEntries) {
+		if (entry.step_kind === "auth_takeover_attempt") continue;
+		executorStep += 1;
+		recapStepByExecutorStep.set(executorStep, entry.step);
+	}
+	const stepKindByStep = new Map(
+		params.mainLoopEntries.map((entry) => [entry.step, entry.step_kind]),
+	);
+
+	const stageRows = params.modelInvocations.map((trace, index) => {
+		const phase = getTokenUsageStagePhase(trace);
+		const sourceStep =
+			typeof trace.meta?.step === "number"
+				? trace.meta.step
+				: typeof trace.meta?.stepNumber === "number"
+					? trace.meta.stepNumber
+					: undefined;
+		const step =
+			phase === "executor" && typeof sourceStep === "number"
+				? (recapStepByExecutorStep.get(sourceStep) ?? sourceStep)
+				: undefined;
+		return {
+			index,
+			row: {
+				sequence: 0,
+				kind: "stage",
+				phase,
+				stage: trace.stage,
+				provider: trace.provider,
+				model: trace.model,
+				...(typeof step === "number" ? { step } : {}),
+				modelAttempt: trace.attempt,
+				usage: trace.usage ? copyTokenUsage(trace.usage) : null,
+			} satisfies TokenUsageArtifactInvocation,
+		};
+	});
+
+	const ordered: TokenUsageArtifactInvocation[] = [];
+	const consumedStageIndexes = new Set<number>();
+	for (const stage of stageRows) {
+		if (stage.row.phase !== "preprocess") continue;
+		ordered.push(stage.row);
+		consumedStageIndexes.add(stage.index);
+	}
+	for (const stepUsage of params.stepTokenUsage) {
+		const stepKind = stepKindByStep.get(stepUsage.step);
+		ordered.push({
+			sequence: 0,
+			kind: "executor_step",
+			phase: "executor",
+			stage:
+				stepKind === "auth_takeover_attempt"
+					? "authTakeover"
+					: "runAgent",
+			provider: params.runAgentProvider,
+			model: params.runAgentModel,
+			step: stepUsage.step,
+			...(stepKind ? { stepKind } : {}),
+			usage: copyTokenUsage(stepUsage),
+		});
+		for (const stage of stageRows) {
+			if (stage.row.step !== stepUsage.step) continue;
+			ordered.push(stage.row);
+			consumedStageIndexes.add(stage.index);
+		}
+	}
+	for (const stage of stageRows) {
+		if (
+			consumedStageIndexes.has(stage.index) ||
+			stage.row.phase === "verification"
+		) {
+			continue;
+		}
+		ordered.push(stage.row);
+		consumedStageIndexes.add(stage.index);
+	}
+	for (const stage of stageRows) {
+		if (stage.row.phase !== "verification") continue;
+		ordered.push(stage.row);
+	}
+	const invocations = ordered.map((invocation, index) => ({
+		...invocation,
+		sequence: index + 1,
+	}));
+	return {
+		runIndex: params.runIndex,
+		retryAttempt: params.retryAttempt,
+		completed: params.completed,
+		successful: params.successful,
+		invocations,
+		totals: sumTokenUsageInvocations(invocations),
+	};
+}
+
 interface RunTaskRetryLoopInput {
 	taskRuns: number;
 	taskRunRetryCount: number;
@@ -253,6 +450,10 @@ export async function runTask(input: RunTaskInput): Promise<RunTaskResult> {
 		current: null,
 	};
 	const runResults: RunTaskResult["runs"] = [];
+	const failedTokenUsageAttemptByRun = new Map<
+		number,
+		TokenUsageArtifactAttempt
+	>();
 
 	console.log(
 		`\n[TASK ${input.taskNumber}/${input.totalTasks}] ${input.task}`,
@@ -276,6 +477,12 @@ export async function runTask(input: RunTaskInput): Promise<RunTaskResult> {
 			);
 		},
 		onRunFailure: ({ runIndex, attemptsUsed, totalAttempts, message }) => {
+			const tokenUsageAttempt =
+				failedTokenUsageAttemptByRun.get(runIndex);
+			if (tokenUsageAttempt) {
+				input.persistence.saveTokenUsageAttempt?.(tokenUsageAttempt);
+				failedTokenUsageAttemptByRun.delete(runIndex);
+			}
 			console.error(
 				`[TASK ${input.taskNumber}] ${runLabel} ${runIndex}/${totalRunAttempts} failed after ${attemptsUsed}/${totalAttempts} attempts: ${message}${
 					runIndex < totalRunAttempts
@@ -287,6 +494,7 @@ export async function runTask(input: RunTaskInput): Promise<RunTaskResult> {
 		executeRun: async (runIndex, attemptOrdinal) => {
 			const attempt = attemptOrdinal - 1;
 			const modelInvocations: StageModelInvocationTrace[] = [];
+			const observedStepTokenUsage: StepTokenUsage[] = [];
 			const recordModelInvocation = (
 				trace: StageModelInvocationTrace,
 			): void => {
@@ -336,55 +544,98 @@ export async function runTask(input: RunTaskInput): Promise<RunTaskResult> {
 			});
 
 			const trajectoryStartedAt = performance.now();
-			const runAgentResult = await runAgent({
-				session: {
-					port: input.browserLaunch.port ?? 9222,
-					headless: input.browserLaunch.headless,
-					downloadDir: scopedFileRoots.downloadDir,
-					downloadRootDir: scopedFileRoots.downloadRootDir,
-					fileWorkspaceRoot: scopedFileRoots.fileWorkspaceRoot,
-					userDataDir: input.browserLaunch.userDataDir,
-					executablePath: input.browserLaunch.executablePath,
-					proxy: input.browserLaunch.proxy,
-					url: taskExecutionOverride?.url ?? input.browserLaunch.url,
-					forceRestart: true,
-				},
-				task: input.task,
-				stageLLMs: input.stageLLMs,
-				featureFlags: configFeatureFlags,
-				initialPlanOverride: taskExecutionOverride?.initialPlanOverride,
-				autoSwitchToNewTab: true,
-				requestAuthDomainCandidates: input.requestAuthDomainCandidates,
-				requestAuthIdentifierForDomain:
-					input.requestAuthIdentifierForDomain,
-				requestAuthPasswordForDomain:
-					input.requestAuthPasswordForDomain,
-				onUserActionRequired: input.onUserActionRequired,
-				recordModelInvocation,
-				maxSteps: input.maxSteps,
-				validatorLifecycle: input.validatorLifecycle,
-				savePlanningDom: async (dom) => {
-					input.persistence.savePlanningDom?.({
-						dom,
+			let runAgentResult: RunAgentResult;
+			try {
+				runAgentResult = await runAgent({
+					session: {
+						port: input.browserLaunch.port ?? 9222,
+						headless: input.browserLaunch.headless,
+						downloadDir: scopedFileRoots.downloadDir,
+						downloadRootDir: scopedFileRoots.downloadRootDir,
+						fileWorkspaceRoot: scopedFileRoots.fileWorkspaceRoot,
+						userDataDir: input.browserLaunch.userDataDir,
+						executablePath: input.browserLaunch.executablePath,
+						proxy: input.browserLaunch.proxy,
+						url:
+							taskExecutionOverride?.url ?? input.browserLaunch.url,
+						forceRestart: true,
+					},
+					task: input.task,
+					stageLLMs: input.stageLLMs,
+					featureFlags: configFeatureFlags,
+					initialPlanOverride:
+						taskExecutionOverride?.initialPlanOverride,
+					autoSwitchToNewTab: true,
+					requestAuthDomainCandidates:
+						input.requestAuthDomainCandidates,
+					requestAuthIdentifierForDomain:
+						input.requestAuthIdentifierForDomain,
+					requestAuthPasswordForDomain:
+						input.requestAuthPasswordForDomain,
+					onUserActionRequired: input.onUserActionRequired,
+					recordModelInvocation,
+					onStepGenerated: ({ stepNumber, usage }) => {
+						observedStepTokenUsage.push({
+							step: stepNumber,
+							input_tokens: usage.input_tokens,
+							cached_input_tokens: usage.cached_input_tokens,
+							reasoning_tokens: usage.reasoning_tokens,
+							non_reasoning_output_tokens:
+								usage.non_reasoning_output_tokens,
+							output_tokens: usage.output_tokens,
+							total_tokens: usage.total_tokens,
+						});
+					},
+					maxSteps: input.maxSteps,
+					validatorLifecycle: input.validatorLifecycle,
+					savePlanningDom: async (dom) => {
+						input.persistence.savePlanningDom?.({
+							dom,
+							runIndex,
+							attempt,
+						});
+					},
+					savePreExecutionPrunerDom: async (dom) => {
+						input.persistence.savePreExecutionPrunerDom?.({
+							dom,
+							runIndex,
+							attempt,
+						});
+					},
+					onPreprocessedTask: async ({ preprocess }) => {
+						console.log(`Target: ${preprocess.target_url}`);
+						console.log(
+							`Plan (${preprocess.plan.length} steps):`,
+						);
+						preprocess.plan.forEach((step, index) => {
+							console.log(`  ${index + 1}. ${step}`);
+						});
+					},
+				});
+			} catch (error) {
+				failedTokenUsageAttemptByRun.set(
+					runIndex,
+					buildTokenUsageArtifactAttempt({
 						runIndex,
-						attempt,
-					});
-				},
-				savePreExecutionPrunerDom: async (dom) => {
-					input.persistence.savePreExecutionPrunerDom?.({
-						dom,
-						runIndex,
-						attempt,
-					});
-				},
-				onPreprocessedTask: async ({ preprocess }) => {
-					console.log(`Target: ${preprocess.target_url}`);
-					console.log(`Plan (${preprocess.plan.length} steps):`);
-					preprocess.plan.forEach((step, index) => {
-						console.log(`  ${index + 1}. ${step}`);
-					});
-				},
-			});
+						retryAttempt: attemptOrdinal,
+						completed: false,
+						successful: false,
+						stepTokenUsage: observedStepTokenUsage,
+						mainLoopEntries: observedStepTokenUsage.map(
+							(usage) => ({
+								step: usage.step,
+								step_kind: "executor_step",
+								messages: [],
+							}),
+						),
+						modelInvocations,
+						runAgentProvider:
+							input.stageLLMs.runAgent.provider,
+						runAgentModel: input.stageLLMs.runAgent.model,
+					}),
+				);
+				throw error;
+			}
 			const durationMs = Math.round(
 				performance.now() - trajectoryStartedAt,
 			);
@@ -435,6 +686,20 @@ export async function runTask(input: RunTaskInput): Promise<RunTaskResult> {
 							totalRuns: totalRunAttempts,
 						},
 				runIndex,
+			);
+			failedTokenUsageAttemptByRun.delete(runIndex);
+			input.persistence.saveTokenUsageAttempt?.(
+				buildTokenUsageArtifactAttempt({
+					runIndex,
+					retryAttempt: attemptOrdinal,
+					completed: runAgentResult.completed,
+					successful: runAgentResult.successful,
+					stepTokenUsage: runAgentResult.stepTokenUsage,
+					mainLoopEntries: runAgentResult.mainLoopEntries,
+					modelInvocations,
+					runAgentProvider: input.stageLLMs.runAgent.provider,
+					runAgentModel: input.stageLLMs.runAgent.model,
+				}),
 			);
 			finalExecutionReportRef.current = {
 				result: displayResult,

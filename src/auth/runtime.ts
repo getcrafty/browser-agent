@@ -24,6 +24,7 @@ import type {
 	SessionAuthTakeoverState,
 } from "./types.js";
 import type { TokenUsage } from "../agents/types.js";
+import { featureFlags } from "../featureFlags.js";
 
 const MAX_AUTH_TAKEOVER_ATTEMPTS = 4;
 const AUTH_IDENTIFIER_MATCH_MARKER = "[AUTH_IDENTIFIER_MATCH]";
@@ -322,6 +323,9 @@ async function buildRedactedDom(params: {
 	authIdentifier?: string;
 }): Promise<string> {
 	const dom = await params.deps.getSimplifiedDOM(params.browser, {
+		...(featureFlags.removeHrefsFromInputContext
+			? { omitHrefs: true }
+			: {}),
 		redactInputBids: [...params.sessionAuth.protectedBids],
 		redactPasswordInputs: true,
 	});

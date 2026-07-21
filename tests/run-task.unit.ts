@@ -5,6 +5,7 @@ import {
 	buildExtractionStepUsage,
 	buildRecapStageUsage,
 	buildRunTaskRunResult,
+	buildTokenUsageArtifactAttempt,
 	getTaskRunRetryDelayMs,
 } from "../src/core/run-task.js";
 import type {
@@ -228,6 +229,98 @@ describe("runTask retry loop", () => {
 			{ parentStep: 3, extractionIndex: 1, usage: firstUsage },
 			{ parentStep: 3, extractionIndex: 2, usage: secondUsage },
 		]);
+	});
+
+	it("builds ordered all-stage token usage artifacts", () => {
+		const usage = (input: number, output: number) => ({
+			input_tokens: input,
+			output_tokens: output,
+			total_tokens: input + output,
+		});
+		const trace = (
+			stage: string,
+			input: number,
+			meta?: Record<string, unknown>,
+		): StageModelInvocationTrace => ({
+			step_kind: "stage_llm",
+			stage,
+			attempt: 1,
+			caller: stage,
+			provider: "openai",
+			model: "stage-model",
+			messages: [{ secret: "must-not-be-persisted" }],
+			usage: usage(input, 1),
+			reasoning_tokens: "must-not-be-persisted",
+			meta,
+		});
+		const result = buildTokenUsageArtifactAttempt({
+			runIndex: 1,
+			retryAttempt: 2,
+			completed: true,
+			successful: true,
+			mainLoopEntries: [
+				{ step: 1, step_kind: "executor_step", messages: [] },
+				{ step: 2, step_kind: "auth_takeover_attempt", messages: [] },
+				{ step: 3, step_kind: "executor_step", messages: [] },
+			],
+			stepTokenUsage: [
+				{ step: 1, ...usage(10, 2) },
+				{
+					step: 2,
+					...usage(20, 3),
+					cached_input_tokens: 5,
+					reasoning_tokens: 1,
+					non_reasoning_output_tokens: 2,
+				},
+				{
+					step: 3,
+					...usage(30, 4),
+					reasoning_tokens: 2,
+					non_reasoning_output_tokens: 2,
+				},
+			],
+			modelInvocations: [
+				trace("findTargetURL", 1),
+				trace("dataExtraction", 4, { step: 2 }),
+				trace("createPlan", 5, {
+					phase: "replan",
+					stepNumber: 2,
+				}),
+				trace("futureStage", 7),
+				trace("verifySuccess", 6),
+			],
+			runAgentProvider: "openai",
+			runAgentModel: "executor-model",
+		});
+
+		assert.deepEqual(
+			result.invocations.map((invocation) => ({
+				sequence: invocation.sequence,
+				stage: invocation.stage,
+				step: invocation.step,
+				stepKind: invocation.stepKind,
+			})),
+			[
+				{ sequence: 1, stage: "findTargetURL", step: undefined, stepKind: undefined },
+				{ sequence: 2, stage: "runAgent", step: 1, stepKind: "executor_step" },
+				{ sequence: 3, stage: "authTakeover", step: 2, stepKind: "auth_takeover_attempt" },
+				{ sequence: 4, stage: "runAgent", step: 3, stepKind: "executor_step" },
+				{ sequence: 5, stage: "dataExtraction", step: 3, stepKind: undefined },
+				{ sequence: 6, stage: "createPlan", step: 3, stepKind: undefined },
+				{ sequence: 7, stage: "futureStage", step: undefined, stepKind: undefined },
+				{ sequence: 8, stage: "verifySuccess", step: undefined, stepKind: undefined },
+			],
+		);
+		assert.deepEqual(result.totals, {
+			input_tokens: 83,
+			cached_input_tokens: 5,
+			reasoning_tokens: 3,
+			non_reasoning_output_tokens: 11,
+			output_tokens: 14,
+			total_tokens: 97,
+			generation_time_ms: 0,
+		});
+		assert.notInclude(JSON.stringify(result), "must-not-be-persisted");
 	});
 
 	it("uses 1s, 3s, then 8s outer retry delays", () => {

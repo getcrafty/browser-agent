@@ -5,6 +5,8 @@ export const featureFlags = {
 	enableMiscInstruction: false,
 	// Replaces vertically distant simplified-DOM subtrees with scroll-to-reveal placeholders.
 	hideOffscreenDomContent: false,
+	// Hides raw href attributes and URL values from every model-facing DOM context.
+	removeHrefsFromInputContext: true,
 	// Removes simplified-DOM branches that contain no semantic content beyond bid/ncid handles.
 	discardEmptyBids: true,
 	// Controls exposing prune/unprune live-DOM actions in executor prompts and execution.
@@ -12,5 +14,5 @@ export const featureFlags = {
 	// Replaces executor action-context fields with prior reasoning traces for non-OpenAI executor models.
 	executorReasoningTraceContext: false,
 	// Sends full/diff DOM context and retains prior assistant reasoning for cacheable executor trajectories.
-	incrementalDomContext: false,
+	incrementalDomContext: true,
 };

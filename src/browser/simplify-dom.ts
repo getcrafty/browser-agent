@@ -40,6 +40,7 @@ export { CONTEXT_DIR, pruneLargeHiddenHierarchies };
 
 export interface SimplifyDomOptions {
 	includeNonClickableIds?: boolean;
+	omitHrefs?: boolean;
 	preserveFullHrefs?: boolean;
 	redactInputBids?: string[];
 	redactPasswordInputs?: boolean;
@@ -1271,6 +1272,8 @@ export async function getSimplifiedDOM(
 ): Promise<string> {
 	const stepNumber = options.stepNumber;
 	const includeNonClickableIds = options.includeNonClickableIds === true;
+	const omitHrefs =
+		options.omitHrefs ?? featureFlags.removeHrefsFromInputContext;
 	const preserveFullHrefs = options.preserveFullHrefs === true;
 	const redactInputBids = new Set(
 		(options.redactInputBids || [])
@@ -1471,6 +1474,7 @@ export async function getSimplifiedDOM(
 				yaml = finalHoistedTree.children
 					.map((c) =>
 						serializeSimplifiedNode(c, 0, false, false, {
+							omitHrefs,
 							preserveFullHrefs,
 						}),
 					)

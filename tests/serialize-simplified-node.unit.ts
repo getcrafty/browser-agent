@@ -396,6 +396,37 @@ describe("serialize-simplified-node", () => {
 		);
 	});
 
+	it("omits href attributes while preserving anchor semantics and bids", () => {
+		const makeNode = (href: string): SimplifiedNode => ({
+			tag: "a",
+			attrs: [
+				["bid", "1"],
+				["href", href],
+			],
+			text: "open link",
+			children: [],
+			isHidden: false,
+			isInteractive: true,
+		});
+
+		for (const href of [
+			"/sample",
+			"",
+			`https://example.com/${"a".repeat(160)}`,
+		]) {
+			const serialized = serializeSimplifiedNode(
+				makeNode(href),
+				0,
+				false,
+				false,
+				{ omitHrefs: true, preserveFullHrefs: true },
+			);
+			assert.strictEqual(serialized, `a bid="1": "open link"`);
+			assert.notInclude(serialized, "href");
+			assert.notInclude(serialized, href || "href");
+		}
+	});
+
 	it("keeps href value when length is 150 characters or less", () => {
 		const href150 = `https://example.com/${"a".repeat(130)}`;
 		const node: SimplifiedNode = {

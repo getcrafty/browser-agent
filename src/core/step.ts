@@ -425,6 +425,9 @@ async function createPromptForStepImpl(
 	const protectAuthContext = shouldProtectAuthContext(session);
 	const domOptions = {
 		includeNonClickableIds: true,
+		...(featureFlags.removeHrefsFromInputContext
+			? { omitHrefs: true }
+			: {}),
 		redactInputBids: protectAuthContext
 			? [...(session.authTakeover?.protectedBids || [])]
 			: [],
@@ -999,6 +1002,9 @@ export async function browse(
 	const protectAuthContext = shouldProtectAuthContext(session);
 	const domOptions = {
 		includeNonClickableIds: true,
+		...(featureFlags.removeHrefsFromInputContext
+			? { omitHrefs: true }
+			: {}),
 		redactInputBids: protectAuthContext
 			? [...(session.authTakeover?.protectedBids || [])]
 			: [],
@@ -1013,7 +1019,11 @@ export async function browse(
 		try {
 			simplifiedDomBeforeActions = await deps.getSimplifiedDOM(
 				session.browser,
-				{ ...domOptions, preserveFullHrefs: true },
+				{
+					...domOptions,
+					omitHrefs: false,
+					preserveFullHrefs: true,
+				},
 			);
 		} catch (error) {
 			additionalInteractionErrors.push(

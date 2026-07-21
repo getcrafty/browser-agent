@@ -75,6 +75,46 @@ export interface ValidatorFeedback {
 	instruction: string;
 }
 
+export interface TokenUsageTotals {
+	input_tokens: number;
+	cached_input_tokens: number;
+	reasoning_tokens: number;
+	non_reasoning_output_tokens: number;
+	output_tokens: number;
+	total_tokens: number;
+	generation_time_ms: number;
+}
+
+export interface TokenUsageArtifactInvocation {
+	sequence: number;
+	kind: "stage" | "executor_step";
+	phase: "preprocess" | "executor" | "verification" | "other";
+	stage: string;
+	provider?: Provider;
+	model?: string;
+	step?: number;
+	stepKind?: MainLoopStepEntry["step_kind"];
+	modelAttempt?: number;
+	usage: TokenUsage | null;
+}
+
+export interface TokenUsageArtifactAttempt {
+	runIndex: number;
+	retryAttempt: number;
+	completed: boolean;
+	successful: boolean;
+	invocations: TokenUsageArtifactInvocation[];
+	totals: TokenUsageTotals;
+}
+
+export interface TaskTokenUsageArtifact {
+	schemaVersion: 1;
+	taskIndex: number;
+	task: string;
+	attempts: TokenUsageArtifactAttempt[];
+	totals: TokenUsageTotals;
+}
+
 export interface CoreDeps {
 	featureFlags: ConfigFeatureFlags;
 	userActionBehavior: "block" | "return" | "callback";
@@ -391,6 +431,7 @@ export interface RunTaskBrowserLaunchOptions {
 
 export interface RunTaskPersistenceCallbacks {
 	appendJsonlEntry: (entry: unknown, runIndex: number) => void;
+	saveTokenUsageAttempt?: (attempt: TokenUsageArtifactAttempt) => void;
 	savePreExecutionPrunerDom?: (params: {
 		dom: string;
 		runIndex: number;

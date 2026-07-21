@@ -46,7 +46,6 @@ export function createMockCoreDeps(
 		websiteAPIficationTools: false,
 		optimizeExecutorStepDelays: false,
 		optimizeTextInput: false,
-		removeHrefsFromInputContext: false,
 	};
 	const tabs: Tab[] = [
 		{ targetId: "tab-1", title: "Home", url: "https://example.com" },

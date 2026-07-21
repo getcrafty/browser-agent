@@ -6,7 +6,6 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 import { afterEach, describe, it } from "mocha";
-import { encoding_for_model } from "tiktoken";
 
 const agentRoot = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
@@ -139,17 +138,18 @@ describe("report-task-outcomes trajectory durations", () => {
 			percentage: "33.33%",
 			fraction: "1/3",
 		});
+		assert.deepEqual(report.tokensPerStep, { status: "no data" });
 	});
 });
 
-describe("report-task-outcomes token estimates", () => {
+describe("report-task-outcomes recorded token usage", () => {
 	afterEach(() => {
 		for (const tempDir of tempDirs.splice(0)) {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
-	it("reports merged input and reasoning-inclusive output estimates", () => {
+	it("reports provider-recorded token totals and per-step statistics", () => {
 		const tempDir = fs.mkdtempSync(
 			path.join(os.tmpdir(), "report-task-outcomes-"),
 		);
@@ -191,15 +191,6 @@ describe("report-task-outcomes token estimates", () => {
 					],
 				},
 				{ messages: [{ role: "user", content: "No assistant yet" }] },
-			],
-			tokenUsage: [
-				{
-					step: 1,
-					input_tokens: 400_000,
-					cached_input_tokens: 120_000,
-					output_tokens: 500_000,
-				},
-				{ step: 2, total_tokens: 600_000, output_tokens: 700_000 },
 			],
 			trajectoryDurationMs: 1_250,
 			stepRuntimeMetrics: [
@@ -254,6 +245,69 @@ describe("report-task-outcomes token estimates", () => {
 			path.join(jsonlDir, "second.jsonl"),
 			`${JSON.stringify(secondEntry)}\n`,
 		);
+		const tokenUsageDir = path.join(jsonlDir, "tokenUsage");
+		fs.mkdirSync(tokenUsageDir);
+		fs.writeFileSync(
+			path.join(tokenUsageDir, "task-001.json"),
+			JSON.stringify({
+				schemaVersion: 1,
+				attempts: [
+					{
+						invocations: [
+							{
+								usage: {
+									input_tokens: 400_000,
+									cached_input_tokens: 120_000,
+									reasoning_tokens: 200_000,
+									non_reasoning_output_tokens: 300_000,
+									output_tokens: 500_000,
+									total_tokens: 900_000,
+								},
+							},
+							{
+								usage: {
+									input_tokens: 600_000,
+									output_tokens: 700_000,
+									total_tokens: 1_300_000,
+								},
+							},
+						],
+					},
+				],
+			}),
+		);
+		fs.writeFileSync(
+			path.join(tokenUsageDir, "task-002.json"),
+			JSON.stringify({
+				schemaVersion: 1,
+				attempts: [
+					{
+						invocations: [
+							{
+								usage: {
+									input_tokens: 100_000,
+									cached_input_tokens: 50_000,
+									reasoning_tokens: 20_000,
+									non_reasoning_output_tokens: 80_000,
+									output_tokens: 100_000,
+									total_tokens: 200_000,
+								},
+							},
+							{
+								usage: {
+									input_tokens: -1,
+									cached_input_tokens: -1,
+									reasoning_tokens: -1,
+									non_reasoning_output_tokens: -1,
+									output_tokens: -1,
+									total_tokens: -1,
+								},
+							},
+						],
+					},
+				],
+			}),
+		);
 		const configPath = path.join(tempDir, "config.yaml");
 		fs.writeFileSync(
 			configPath,
@@ -277,27 +331,12 @@ describe("report-task-outcomes token estimates", () => {
 		assert.deepInclude(report.successRate as Record<string, unknown>, {
 			totalTaskAttempts: 2,
 		});
-		const encoding = encoding_for_model("gpt-5");
-		const count = (text: string): number => encoding.encode(text).length;
-		const inputCounts = [
-			count(
-				"system:\nSystem one\n[image_url omitted]\n\nassistant:\nIntermediate observation\n\nuser:\nRequest alpha",
-			),
-			count("user:\nNo assistant yet"),
-			count(
-				"system:\nSystem two\n[image_url omitted]\n\nuser:\nRequest beta",
-			),
-		];
-		const outputCounts = [
-			count("assistant:\ndone: true\nresult: alpha") +
-				count("Considered alpha carefully"),
-			0,
-			count("assistant:\ndone: false\nresult: beta"),
-		];
-		encoding.free();
-		const totalCounts = inputCounts.map(
-			(inputCount, index) => inputCount + outputCounts[index],
-		);
+		const inputCounts = [400_000, 600_000, 100_000];
+		const cachedInputCounts = [120_000, 0, 50_000];
+		const reasoningCounts = [200_000, 0, 20_000];
+		const nonReasoningOutputCounts = [300_000, 700_000, 80_000];
+		const outputCounts = [500_000, 700_000, 100_000];
+		const totalCounts = [900_000, 1_300_000, 200_000];
 		const sum = (values: number[]): number =>
 			values.reduce((total, value) => total + value, 0);
 		const formatted = (value: number): string =>
@@ -313,7 +352,15 @@ describe("report-task-outcomes token estimates", () => {
 		);
 		assert.strictEqual(
 			report.totalCachedInputTokensAcrossAllTaskSteps,
-			"120,000",
+			formatted(sum(cachedInputCounts)),
+		);
+		assert.strictEqual(
+			report.totalReasoningTokensAcrossAllTaskSteps,
+			formatted(sum(reasoningCounts)),
+		);
+		assert.strictEqual(
+			report.totalNonReasoningOutputTokensAcrossAllTaskSteps,
+			formatted(sum(nonReasoningOutputCounts)),
 		);
 		assert.strictEqual(
 			report.totalTokensAcrossAllTaskSteps,
@@ -329,7 +376,15 @@ describe("report-task-outcomes token estimates", () => {
 		);
 		assert.deepInclude(
 			report.cachedInputTokensPerStep as Stats,
-			summarize([120_000, 0]),
+			summarize(cachedInputCounts),
+		);
+		assert.deepInclude(
+			report.reasoningTokensPerStep as Stats,
+			summarize(reasoningCounts),
+		);
+		assert.deepInclude(
+			report.nonReasoningOutputTokensPerStep as Stats,
+			summarize(nonReasoningOutputCounts),
 		);
 		assert.deepInclude(
 			report.tokensPerStep as Stats,

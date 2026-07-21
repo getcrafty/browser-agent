@@ -3,10 +3,14 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { describe, it } from "mocha";
-import { main } from "../src/index.js";
+import { main, saveTaskTokenUsageAttempt } from "../src/index.js";
 import { normalizeAuthCredentialsForStorage } from "../src/auth/crypto.js";
 import type { Config } from "../src/utils.js";
-import type { RunTaskInput, RunTaskResult } from "../src/core/types.js";
+import type {
+	RunTaskInput,
+	RunTaskResult,
+	TokenUsageArtifactAttempt,
+} from "../src/core/types.js";
 
 function createConfig(overrides: Partial<Config> = {}): Config {
 	return {
@@ -74,6 +78,139 @@ function createConfig(overrides: Partial<Config> = {}): Config {
 }
 
 describe("index main", () => {
+	it("atomically upserts one token usage artifact per task run", () => {
+		const root = fs.mkdtempSync(
+			path.join(os.tmpdir(), "browser-agent-token-usage-"),
+		);
+		const tokenUsageDir = path.join(root, "tokenUsage");
+		const createAttempt = (
+			runIndex: number,
+			inputTokens: number,
+		): TokenUsageArtifactAttempt => ({
+			runIndex,
+			retryAttempt: 1,
+			completed: true,
+			successful: true,
+			invocations: [],
+			totals: {
+				input_tokens: inputTokens,
+				cached_input_tokens: 0,
+				reasoning_tokens: 0,
+				non_reasoning_output_tokens: 1,
+				output_tokens: 1,
+				total_tokens: inputTokens + 1,
+				generation_time_ms: 0,
+			},
+		});
+
+		try {
+			saveTaskTokenUsageAttempt({
+				tokenUsageDir,
+				taskNumber: 7,
+				task: "test task",
+				attempt: createAttempt(2, 20),
+			});
+			saveTaskTokenUsageAttempt({
+				tokenUsageDir,
+				taskNumber: 7,
+				task: "test task",
+				attempt: createAttempt(1, 10),
+			});
+			saveTaskTokenUsageAttempt({
+				tokenUsageDir,
+				taskNumber: 7,
+				task: "test task",
+				attempt: createAttempt(2, 30),
+			});
+
+			assert.deepEqual(fs.readdirSync(tokenUsageDir), ["task-007.json"]);
+			const artifact = JSON.parse(
+				fs.readFileSync(
+					path.join(tokenUsageDir, "task-007.json"),
+					"utf-8",
+				),
+			);
+			assert.strictEqual(artifact.schemaVersion, 1);
+			assert.deepEqual(
+				artifact.attempts.map(
+					(attempt: TokenUsageArtifactAttempt) => ({
+						runIndex: attempt.runIndex,
+						inputTokens: attempt.totals.input_tokens,
+					}),
+				),
+				[
+					{ runIndex: 1, inputTokens: 10 },
+					{ runIndex: 2, inputTokens: 30 },
+				],
+			);
+			assert.strictEqual(artifact.totals.input_tokens, 40);
+			assert.strictEqual(artifact.totals.total_tokens, 42);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("writes independent token usage files for concurrent tasks", async () => {
+		const config = createConfig({
+			concurrency: 2,
+			tasks: [{ task: "first task" }, { task: "second task" }],
+		});
+		const tokenUsageDir = path.join(
+			path.dirname(config.stepMessagesJsonlPath),
+			"tokenUsage",
+		);
+		try {
+			await main(
+				["node", "src/index.ts", "pipeline"],
+				() => config,
+				async (input) => {
+					input.persistence.saveTokenUsageAttempt?.({
+						runIndex: 1,
+						retryAttempt: 1,
+						completed: true,
+						successful: true,
+						invocations: [],
+						totals: {
+							input_tokens: input.taskNumber,
+							cached_input_tokens: 0,
+							reasoning_tokens: 0,
+							non_reasoning_output_tokens: 0,
+							output_tokens: 0,
+							total_tokens: input.taskNumber,
+							generation_time_ms: 0,
+						},
+					});
+					return {
+						failedRuns: [],
+						runtimeFailedRuns: [],
+						terminalFailedRuns: [],
+						runs: [],
+					};
+				},
+			);
+
+			assert.deepEqual(fs.readdirSync(tokenUsageDir).sort(), [
+				"task-001.json",
+				"task-002.json",
+			]);
+			const taskIndices = fs
+				.readdirSync(tokenUsageDir)
+				.map((file) =>
+					JSON.parse(
+						fs.readFileSync(path.join(tokenUsageDir, file), "utf-8"),
+					),
+				)
+				.map((artifact) => artifact.taskIndex)
+				.sort();
+			assert.deepEqual(taskIndices, [1, 2]);
+		} finally {
+			fs.rmSync(path.dirname(config.stepMessagesJsonlPath), {
+				recursive: true,
+				force: true,
+			});
+		}
+	});
+
 	it("uses each task's own encrypted credentials", async () => {
 		const firstKey = Buffer.alloc(32, 1).toString("base64");
 		const secondKey = Buffer.alloc(32, 2).toString("base64");

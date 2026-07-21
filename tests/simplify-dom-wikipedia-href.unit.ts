@@ -1,6 +1,10 @@
 import { assert } from "chai";
-import { describe, it } from "mocha";
+import { afterEach, describe, it } from "mocha";
 import { getSimplifiedDOM } from "../src/browser/simplify-dom.js";
+import { featureFlags } from "../src/featureFlags.js";
+
+const ORIGINAL_REMOVE_HREFS_FROM_INPUT_CONTEXT =
+	featureFlags.removeHrefsFromInputContext;
 
 function makeSnapshotWithAnchor(
 	documentUrl: string,
@@ -80,6 +84,11 @@ function createMockBrowser(snapshot: any): any {
 }
 
 describe("simplify-dom wikipedia href normalization", () => {
+	afterEach(() => {
+		featureFlags.removeHrefsFromInputContext =
+			ORIGINAL_REMOVE_HREFS_FROM_INPUT_CONTEXT;
+	});
+
 	it("normalizes wikipedia hrefs while preserving anchors", async () => {
 		const browser = createMockBrowser(
 			makeSnapshotWithAnchor("https://en.wikipedia.org/wiki/Google"),
@@ -107,6 +116,20 @@ describe("simplify-dom wikipedia href normalization", () => {
 		);
 		const simplified = await getSimplifiedDOM(browser);
 		assert.include(simplified, `href="/wiki/Google"`);
+	});
+
+	it("removes hrefs through the internal feature flag", async () => {
+		featureFlags.removeHrefsFromInputContext = true;
+		const browser = createMockBrowser(
+			makeSnapshotWithAnchor("https://example.com/page"),
+		);
+
+		const simplified = await getSimplifiedDOM(browser);
+
+		assert.include(simplified, `a bid="abc"`);
+		assert.include(simplified, "Google");
+		assert.notInclude(simplified, "href");
+		assert.notInclude(simplified, "/wiki/Google");
 	});
 
 	it("normalizes javascript hrefs", async () => {

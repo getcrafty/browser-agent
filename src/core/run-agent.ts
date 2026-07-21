@@ -691,7 +691,7 @@ export async function runAgent(
 			"Browser success verification requires an explicit stageLLMs.verifySuccess model configuration.",
 		);
 	}
-	const deps = isCoreDeps(depsOrInput)
+	const baseDeps = isCoreDeps(depsOrInput)
 		? {
 				...depsOrInput,
 				waitForAutomationPermission:
@@ -707,6 +707,18 @@ export async function runAgent(
 				requestAgentTakeover: depsOrInput.requestAgentTakeover,
 				defaultSuccessVerifierLLMOptions: successVerifierLLMOptions,
 			});
+	const removeHrefsFromInputContext =
+		featureFlags.removeHrefsFromInputContext;
+	const deps: CoreDeps = {
+		...baseDeps,
+		getSimplifiedDOM: (browser, options) =>
+			baseDeps.getSimplifiedDOM(browser, {
+				...options,
+				...(removeHrefsFromInputContext
+					? { omitHrefs: options?.preserveFullHrefs !== true }
+					: {}),
+			}),
+	};
 	const input = rawInput;
 	const executorPromptOptions = {
 		provider: input.stageLLMs.runAgent.provider,

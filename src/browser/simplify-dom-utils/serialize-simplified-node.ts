@@ -15,11 +15,13 @@ const OMIT_LONG_HREF_THRESHOLD = 150;
 
 interface HeadFormatOptions {
 	forceTagName?: boolean;
+	omitHrefs?: boolean;
 	preserveFullHrefs?: boolean;
 	suppressCouldBeHiddenMarker?: boolean;
 }
 
 export interface SerializeSimplifiedNodeOptions {
+	omitHrefs?: boolean;
 	preserveFullHrefs?: boolean;
 }
 
@@ -57,6 +59,7 @@ function shouldSuppressTagName(
 	options: HeadFormatOptions = {},
 ): boolean {
 	if (options.forceTagName) return false;
+	if (options.omitHrefs && node.tag === "a") return false;
 	return (
 		shouldSuppressDivSpanTag(node) ||
 		shouldSuppressTagForAttrRule(node) ||
@@ -94,6 +97,7 @@ function formatSerializedHead(
 	let head = suppressTag ? indent : `${indent}${node.tag}`;
 
 	for (const [rawName, value] of node.attrs) {
+		if (options.omitHrefs && rawName === "href") continue;
 		const rewrittenName =
 			node.tag === "img" && rawName === "src" ? "img" : rawName;
 		const name = rewrittenName === "aria-label" ? "label" : rewrittenName;
@@ -409,6 +413,7 @@ function serializeChildren(
 					combinedNode,
 					baseDepth,
 					{
+						omitHrefs: options.omitHrefs,
 						preserveFullHrefs: options.preserveFullHrefs,
 						suppressCouldBeHiddenMarker: couldBeHiddenCtx,
 					},
@@ -480,6 +485,7 @@ export function serializeSimplifiedNode(
 	if (anchorOutline) {
 		const head = formatSerializedHead(anchorOutline.headNode, depth, {
 			forceTagName: true,
+			omitHrefs: options.omitHrefs,
 			preserveFullHrefs: options.preserveFullHrefs,
 			suppressCouldBeHiddenMarker: inCouldBeHiddenContext,
 		});
@@ -496,6 +502,7 @@ export function serializeSimplifiedNode(
 	}
 
 	const head = formatSerializedHead(node, depth, {
+		omitHrefs: options.omitHrefs,
 		preserveFullHrefs: options.preserveFullHrefs,
 		suppressCouldBeHiddenMarker: inCouldBeHiddenContext,
 	});

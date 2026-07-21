@@ -5,11 +5,8 @@ import * as path from "path";
 import * as readline from "readline";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
-import { encoding_for_model } from "tiktoken";
 
-const TOKEN_ESTIMATE_MODEL = "gpt-5";
 const WORKER_MODE_FLAG = "--worker-child";
-let tokenEncoding: ReturnType<typeof encoding_for_model> | null = null;
 
 interface NumericStatsWithPercentiles {
 	count: number;
@@ -31,17 +28,13 @@ interface ParsedFileMetrics {
 	tokenCountsPerStep: number[];
 	inputTokenCountsPerStep: number[];
 	cachedInputTokenCountsPerStep: number[];
+	reasoningTokenCountsPerStep: number[];
+	nonReasoningOutputTokenCountsPerStep: number[];
 	outputTokenCountsPerStep: number[];
 	trajectoryDurationMsPerAttempt: number[];
 	stepDurationMs: number[];
 	tokenGenerationMs: number[];
 	browserInteractionMs: number[];
-}
-
-interface EstimatedStepTokenCounts {
-	inputTokens: number;
-	outputTokens: number;
-	totalTokens: number;
 }
 
 interface ErrorTaskRecord {
@@ -210,7 +203,7 @@ function summarizeWithPercentiles(
 	};
 }
 
-function summarizeImageUrlForTokenEstimate(_url: unknown): string {
+function summarizeImageUrl(_url: unknown): string {
 	return "[image_url omitted]";
 }
 
@@ -232,26 +225,11 @@ function normalizeContentToText(content: unknown): string {
 				| Record<string, unknown>
 				| undefined;
 			const url = imageUrl?.url;
-			parts.push(summarizeImageUrlForTokenEstimate(url));
+			parts.push(summarizeImageUrl(url));
 			continue;
 		}
 	}
 	return parts.join("\n");
-}
-
-function messageToText(message: unknown): string {
-	if (!message || typeof message !== "object") return "";
-	const msg = message as Record<string, unknown>;
-	const role =
-		typeof msg.role === "string" && msg.role.trim().length > 0
-			? msg.role
-			: "unknown";
-	const contentText = normalizeContentToText(msg.content);
-	return `${role}:\n${contentText}`;
-}
-
-function messagesToText(messages: unknown[]): string {
-	return messages.map((message) => messageToText(message)).join("\n\n");
 }
 
 function extractDoneFromAssistantContent(content: string): boolean {
@@ -308,77 +286,55 @@ function extractExecutorCompletionFromEntry(
 	return false;
 }
 
-function estimateTokenCount(text: string): number {
-	try {
-		if (!tokenEncoding)
-			tokenEncoding = encoding_for_model(TOKEN_ESTIMATE_MODEL);
-		return tokenEncoding.encode(text).length;
-	} catch {
-		return Math.max(1, Math.ceil(text.length / 4));
-	}
-}
-
-function estimateTokenCountsByStepFromMessages(
-	entry: Record<string, unknown>,
-): EstimatedStepTokenCounts[] {
-	const steps = Array.isArray(entry.steps) ? entry.steps : [];
-	const perStepTokenCounts: EstimatedStepTokenCounts[] = [];
-	for (const step of steps) {
-		if (!step || typeof step !== "object") continue;
-		const messages = Array.isArray(
-			(step as Record<string, unknown>).messages,
-		)
-			? ((step as Record<string, unknown>).messages as unknown[])
-			: [];
-		if (messages.length === 0) continue;
-
-		let lastAssistantIndex = -1;
-		for (let i = messages.length - 1; i >= 0; i--) {
-			const message = messages[i];
-			if (!message || typeof message !== "object") continue;
-			if ((message as Record<string, unknown>).role === "assistant") {
-				lastAssistantIndex = i;
-				break;
-			}
-		}
-
-		const promptMessages =
-			lastAssistantIndex >= 0
-				? messages.slice(0, lastAssistantIndex)
-				: messages;
-		const stepInputTokens = estimateTokenCount(
-			messagesToText(promptMessages),
-		);
-		const stepOutputTokens =
-			lastAssistantIndex >= 0
-				? estimateAssistantOutputTokenCount(
-						messages[lastAssistantIndex],
-					)
-				: 0;
-		perStepTokenCounts.push({
-			inputTokens: stepInputTokens,
-			outputTokens: stepOutputTokens,
-			totalTokens: stepInputTokens + stepOutputTokens,
-		});
-	}
-	return perStepTokenCounts;
-}
-
-function estimateAssistantOutputTokenCount(message: unknown): number {
-	const visibleOutputTokens = estimateTokenCount(messageToText(message));
-	if (!message || typeof message !== "object") return visibleOutputTokens;
-	const reasoningTokens = (message as Record<string, unknown>)
-		.reasoning_tokens;
-	return (
-		visibleOutputTokens +
-		(typeof reasoningTokens === "string" && reasoningTokens.length > 0
-			? estimateTokenCount(reasoningTokens)
-			: 0)
-	);
-}
-
 function finiteNumberOrNull(value: unknown): number | null {
 	return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function finiteNonNegativeNumberOrNull(value: unknown): number | null {
+	const number = finiteNumberOrNull(value);
+	return number !== null && number >= 0 ? number : null;
+}
+
+function appendRecordedTokenUsage(
+	metrics: ParsedFileMetrics,
+	rawUsage: unknown,
+): void {
+	if (!rawUsage || typeof rawUsage !== "object") return;
+	const usage = rawUsage as Record<string, unknown>;
+	const inputTokens = finiteNonNegativeNumberOrNull(usage.input_tokens);
+	const cachedInputTokens = usage.cached_input_tokens;
+	const reasoningTokens = usage.reasoning_tokens;
+	const nonReasoningOutputTokens = usage.non_reasoning_output_tokens;
+	const outputTokens = finiteNonNegativeNumberOrNull(usage.output_tokens);
+	const totalTokens = finiteNonNegativeNumberOrNull(usage.total_tokens);
+
+	if (inputTokens !== null) metrics.inputTokenCountsPerStep.push(inputTokens);
+	if (cachedInputTokens === undefined) {
+		metrics.cachedInputTokenCountsPerStep.push(0);
+	} else {
+		const value = finiteNonNegativeNumberOrNull(cachedInputTokens);
+		if (value !== null) metrics.cachedInputTokenCountsPerStep.push(value);
+	}
+	if (reasoningTokens === undefined) {
+		metrics.reasoningTokenCountsPerStep.push(0);
+	} else {
+		const value = finiteNonNegativeNumberOrNull(reasoningTokens);
+		if (value !== null) metrics.reasoningTokenCountsPerStep.push(value);
+	}
+	if (nonReasoningOutputTokens === undefined) {
+		if (reasoningTokens === undefined && outputTokens !== null) {
+			metrics.nonReasoningOutputTokenCountsPerStep.push(outputTokens);
+		}
+	} else {
+		const value = finiteNonNegativeNumberOrNull(
+			nonReasoningOutputTokens,
+		);
+		if (value !== null) {
+			metrics.nonReasoningOutputTokenCountsPerStep.push(value);
+		}
+	}
+	if (outputTokens !== null) metrics.outputTokenCountsPerStep.push(outputTokens);
+	if (totalTokens !== null) metrics.tokenCountsPerStep.push(totalTokens);
 }
 
 function extractRuntimeMetrics(entry: Record<string, unknown>): {
@@ -440,6 +396,46 @@ function collectJsonlFiles(rootDir: string): string[] {
 		}
 	}
 	return files.sort();
+}
+
+function collectTokenUsageFiles(rootDir: string): string[] {
+	const tokenUsageDir = path.join(rootDir, "tokenUsage");
+	if (!fs.existsSync(tokenUsageDir)) return [];
+	return fs
+		.readdirSync(tokenUsageDir, { withFileTypes: true })
+		.filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+		.map((entry) => path.join(tokenUsageDir, entry.name))
+		.sort();
+}
+
+function parseTokenUsageArtifacts(rootDir: string): ParsedFileMetrics {
+	const metrics = createEmptyMetrics();
+	for (const filePath of collectTokenUsageFiles(rootDir)) {
+		const artifact = JSON.parse(
+			fs.readFileSync(filePath, "utf-8"),
+		) as Record<string, unknown>;
+		if (artifact.schemaVersion !== 1 || !Array.isArray(artifact.attempts)) {
+			throw new Error(`Invalid token usage artifact: ${filePath}`);
+		}
+		const attempts = artifact.attempts;
+		for (const rawAttempt of attempts) {
+			if (!rawAttempt || typeof rawAttempt !== "object") continue;
+			const invocations = Array.isArray(
+				(rawAttempt as Record<string, unknown>).invocations,
+			)
+				? ((rawAttempt as Record<string, unknown>)
+						.invocations as unknown[])
+				: [];
+			for (const rawInvocation of invocations) {
+				if (!rawInvocation || typeof rawInvocation !== "object") continue;
+				appendRecordedTokenUsage(
+					metrics,
+					(rawInvocation as Record<string, unknown>).usage,
+				);
+			}
+		}
+	}
+	return metrics;
 }
 
 function getErrorTasksPath(rootDir: string): string | null {
@@ -593,6 +589,12 @@ function mergeParsedMetrics(
 	current.cachedInputTokenCountsPerStep.push(
 		...next.cachedInputTokenCountsPerStep,
 	);
+	current.reasoningTokenCountsPerStep.push(
+		...next.reasoningTokenCountsPerStep,
+	);
+	current.nonReasoningOutputTokenCountsPerStep.push(
+		...next.nonReasoningOutputTokenCountsPerStep,
+	);
 	current.outputTokenCountsPerStep.push(...next.outputTokenCountsPerStep);
 	current.trajectoryDurationMsPerAttempt.push(
 		...next.trajectoryDurationMsPerAttempt,
@@ -615,6 +617,8 @@ function createEmptyMetrics(): ParsedFileMetrics {
 		tokenCountsPerStep: [],
 		inputTokenCountsPerStep: [],
 		cachedInputTokenCountsPerStep: [],
+		reasoningTokenCountsPerStep: [],
+		nonReasoningOutputTokenCountsPerStep: [],
 		outputTokenCountsPerStep: [],
 		trajectoryDurationMsPerAttempt: [],
 		stepDurationMs: [],
@@ -914,6 +918,8 @@ async function parseFile(filePath: string): Promise<ParsedFileMetrics> {
 	const tokenCountsPerStep: number[] = [];
 	const inputTokenCountsPerStep: number[] = [];
 	const cachedInputTokenCountsPerStep: number[] = [];
+	const reasoningTokenCountsPerStep: number[] = [];
+	const nonReasoningOutputTokenCountsPerStep: number[] = [];
 	const outputTokenCountsPerStep: number[] = [];
 	const trajectoryDurationMsPerAttempt: number[] = [];
 	const stepDurationMs: number[] = [];
@@ -974,30 +980,6 @@ async function parseFile(filePath: string): Promise<ParsedFileMetrics> {
 		if (extractExecutorCompletionFromEntry(entry))
 			executorCompletedTaskRuns += 1;
 
-		const tokenCounts = estimateTokenCountsByStepFromMessages(entry);
-		for (const tokenCount of tokenCounts) {
-			inputTokenCountsPerStep.push(tokenCount.inputTokens);
-			outputTokenCountsPerStep.push(tokenCount.outputTokens);
-			tokenCountsPerStep.push(tokenCount.totalTokens);
-		}
-		const tokenUsage = Array.isArray(entry.tokenUsage)
-			? entry.tokenUsage
-			: [];
-		for (const rawUsage of tokenUsage) {
-			if (!rawUsage || typeof rawUsage !== "object") continue;
-			const cachedInputTokens = (rawUsage as Record<string, unknown>)
-				.cached_input_tokens;
-			if (cachedInputTokens === undefined) {
-				cachedInputTokenCountsPerStep.push(0);
-			} else if (
-				typeof cachedInputTokens === "number" &&
-				Number.isFinite(cachedInputTokens) &&
-				cachedInputTokens >= 0
-			) {
-				cachedInputTokenCountsPerStep.push(cachedInputTokens);
-			}
-		}
-
 		const runtimeMetrics = extractRuntimeMetrics(entry);
 		if (runtimeMetrics) {
 			trajectoryDurationMsPerAttempt.push(
@@ -1020,6 +1002,8 @@ async function parseFile(filePath: string): Promise<ParsedFileMetrics> {
 		tokenCountsPerStep,
 		inputTokenCountsPerStep,
 		cachedInputTokenCountsPerStep,
+		reasoningTokenCountsPerStep,
+		nonReasoningOutputTokenCountsPerStep,
 		outputTokenCountsPerStep,
 		trajectoryDurationMsPerAttempt,
 		stepDurationMs,
@@ -1075,6 +1059,10 @@ async function main(): Promise<void> {
 		requestedWorkerCount,
 		onFileProcessed,
 	);
+	mergeParsedMetrics(
+		aggregatedMetrics,
+		parseTokenUsageArtifacts(jsonlDir),
+	);
 	const errorTaskRecords = loadErrorTaskRecords(jsonlDir);
 	const errorMessageAggregates =
 		buildErrorMessageAggregates(errorTaskRecords);
@@ -1119,6 +1107,17 @@ async function main(): Promise<void> {
 	const totalCachedInputTokensAcrossAllTaskSteps =
 		aggregatedMetrics.cachedInputTokenCountsPerStep.reduce(
 			(sum, cachedInputTokenCount) => sum + cachedInputTokenCount,
+			0,
+		);
+	const totalReasoningTokensAcrossAllTaskSteps =
+		aggregatedMetrics.reasoningTokenCountsPerStep.reduce(
+			(sum, reasoningTokenCount) => sum + reasoningTokenCount,
+			0,
+		);
+	const totalNonReasoningOutputTokensAcrossAllTaskSteps =
+		aggregatedMetrics.nonReasoningOutputTokenCountsPerStep.reduce(
+			(sum, nonReasoningOutputTokenCount) =>
+				sum + nonReasoningOutputTokenCount,
 			0,
 		);
 	const totalTrajectoryDurationMs =
@@ -1176,6 +1175,13 @@ async function main(): Promise<void> {
 		totalCachedInputTokensAcrossAllTaskSteps: formatIntegerWithCommas(
 			totalCachedInputTokensAcrossAllTaskSteps,
 		),
+		totalReasoningTokensAcrossAllTaskSteps: formatIntegerWithCommas(
+			totalReasoningTokensAcrossAllTaskSteps,
+		),
+		totalNonReasoningOutputTokensAcrossAllTaskSteps:
+			formatIntegerWithCommas(
+				totalNonReasoningOutputTokensAcrossAllTaskSteps,
+			),
 		totalOutputTokensAcrossAllTaskSteps: formatIntegerWithCommas(
 			totalOutputTokensAcrossAllTaskSteps,
 		),
@@ -1222,6 +1228,16 @@ async function main(): Promise<void> {
 		cachedInputTokensPerStep: normalizeStatsForOutput(
 			summarizeWithPercentiles(
 				aggregatedMetrics.cachedInputTokenCountsPerStep,
+			),
+		),
+		reasoningTokensPerStep: normalizeStatsForOutput(
+			summarizeWithPercentiles(
+				aggregatedMetrics.reasoningTokenCountsPerStep,
+			),
+		),
+		nonReasoningOutputTokensPerStep: normalizeStatsForOutput(
+			summarizeWithPercentiles(
+				aggregatedMetrics.nonReasoningOutputTokenCountsPerStep,
 			),
 		),
 		outputTokensPerStep: normalizeStatsForOutput(

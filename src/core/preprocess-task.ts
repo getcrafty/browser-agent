@@ -196,7 +196,11 @@ export async function preprocessTask(
 	async function navigateAndGetPlanningDom(url: string): Promise<string> {
 		await deps.navigateBrowser(session.browser, url);
 		await dismissCookieBannerIfEnabled();
-		return await deps.getSimplifiedDOM(session.browser);
+		return await deps.getSimplifiedDOM(session.browser, {
+			...(featureFlags.removeHrefsFromInputContext
+				? { omitHrefs: true }
+				: {}),
+		});
 	}
 
 	const explicitStartUrl = input.url?.trim();
@@ -204,7 +208,11 @@ export async function preprocessTask(
 	let planningDom: string;
 	if (explicitStartUrl) {
 		await dismissCookieBannerIfEnabled();
-		planningDom = await deps.getSimplifiedDOM(session.browser);
+		planningDom = await deps.getSimplifiedDOM(session.browser, {
+			...(featureFlags.removeHrefsFromInputContext
+				? { omitHrefs: true }
+				: {}),
+		});
 	} else {
 		planningDom = await navigateAndGetPlanningDom(targetURL);
 	}
@@ -236,6 +244,9 @@ export async function preprocessTask(
 	if (deps.featureFlags.preExecutionDomPruning) {
 		const prunerDom = await deps.getSimplifiedDOM(session.browser, {
 			includeNonClickableIds: true,
+			...(featureFlags.removeHrefsFromInputContext
+				? { omitHrefs: true }
+				: {}),
 		});
 		await input.savePreExecutionPrunerDom?.(prunerDom);
 		const pruneDecision = await measureLoggedStage({

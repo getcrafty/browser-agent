@@ -47,6 +47,7 @@ import type { CoreDeps } from "./types.js";
 import type { LLMOptions } from "../agents/types.js";
 import type { UserTakeoverCategory } from "../user-action-types.js";
 import { verifyTaskSuccess } from "../agents/success-verifier.js";
+import { featureFlags as internalFeatureFlags } from "../featureFlags.js";
 
 async function defaultIsPortInUse(port: number): Promise<boolean> {
 	return await new Promise((resolve) => {
@@ -115,7 +116,15 @@ export function createDefaultCoreDeps(
 		closeBrowser: close,
 		navigateBrowser: navigate,
 		getCurrentURL: getURL,
-		getSimplifiedDOM,
+		getSimplifiedDOM: (browser, domOptions) =>
+			getSimplifiedDOM(browser, {
+				...domOptions,
+				...(internalFeatureFlags.removeHrefsFromInputContext
+					? {
+							omitHrefs: domOptions?.preserveFullHrefs !== true,
+						}
+					: {}),
+			}),
 		listTabs,
 		extractValidBids,
 		findTargetURL,

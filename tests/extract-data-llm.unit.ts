@@ -3,8 +3,11 @@ import { afterEach, describe, it } from "mocha";
 import { extractDataResultsFromSnapshot } from "../src/agents/data-extraction.js";
 import { __setProviderOverrideForTests } from "../src/agents/providers/ai-sdk.js";
 import type { StageModelInvocationTrace } from "../src/agents/types.js";
+import { featureFlags } from "../src/featureFlags.js";
 
 const LLM_OPTIONS = { provider: "openai", model: "gpt-test" } as const;
+const ORIGINAL_REMOVE_HREFS_FROM_INPUT_CONTEXT =
+	featureFlags.removeHrefsFromInputContext;
 
 describe("extractDataResultsFromSnapshot", () => {
 	async function expectRejection(
@@ -32,6 +35,8 @@ describe("extractDataResultsFromSnapshot", () => {
 
 	afterEach(() => {
 		__setProviderOverrideForTests("openai", null);
+		featureFlags.removeHrefsFromInputContext =
+			ORIGINAL_REMOVE_HREFS_FROM_INPUT_CONTEXT;
 	});
 
 	it("keeps hrefs alongside link IDs and resolves selected IDs", async () => {
@@ -98,6 +103,48 @@ describe("extractDataResultsFromSnapshot", () => {
 		assert.include(prompt, "link_id: <quoted link_id>");
 		assert.strictEqual(traces[0]?.stage, "dataExtraction");
 		assert.deepStrictEqual(traces[0]?.meta, { root: "!1" });
+	});
+
+	it("hides hrefs behind link IDs while preserving runtime URL resolution", async () => {
+		featureFlags.removeHrefsFromInputContext = true;
+		let prompt = "";
+		__setProviderOverrideForTests("openai", async (args) => {
+			prompt = args.prompt;
+			return {
+				content: [
+					"items:",
+					"  - link_id: link_1",
+					"    summary: First product",
+					"  - link_id: link_2",
+					"    summary: Second product",
+				].join("\n"),
+				usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+				reasoning_tokens: "",
+			};
+		});
+
+		const result = await extractDataResultsFromSnapshot({
+			task: "Extract products",
+			currentUrl: "https://example.com/search",
+			simplifiedDom: [
+				'article href="/private-one": First product',
+				'  a href="https://other.example/private-two": Second product',
+			].join("\n"),
+			llmOptions: LLM_OPTIONS,
+		});
+
+		assert.include(prompt, 'article link_id="link_1": First product');
+		assert.include(prompt, 'a link_id="link_2": Second product');
+		assert.notInclude(prompt, "href=");
+		assert.notInclude(prompt, "/private-one");
+		assert.notInclude(prompt, "https://other.example/private-two");
+		assert.deepStrictEqual(result.items, [
+			{ link: "https://example.com/private-one", summary: "First product" },
+			{
+				link: "https://other.example/private-two",
+				summary: "Second product",
+			},
+		]);
 	});
 
 	it("resolves browser URL forms and falls back for unusable hrefs", async () => {

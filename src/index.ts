@@ -17,6 +17,9 @@ import type {
 	RunTaskInput,
 	RunTaskPersistenceCallbacks,
 	RunTaskResult,
+	TaskTokenUsageArtifact,
+	TokenUsageArtifactAttempt,
+	TokenUsageTotals,
 } from "./core/types.js";
 import { createAuthCredentialCallbacksFromInput } from "./auth/crypto.js";
 import { prepareWorkerUserDataDirs } from "./browser/profile.js";
@@ -31,6 +34,89 @@ import { loadTaskExecutionOverrides } from "./core/task-execution-overrides.js";
 function appendJsonlEntry(filePath: string, entry: unknown): void {
 	fs.mkdirSync(path.dirname(filePath), { recursive: true });
 	fs.appendFileSync(filePath, `${JSON.stringify(entry)}\n`, "utf-8");
+}
+
+function sumArtifactAttemptTotals(
+	attempts: TokenUsageArtifactAttempt[],
+): TokenUsageTotals {
+	return attempts.reduce<TokenUsageTotals>(
+		(totals, attempt) => {
+			totals.input_tokens += attempt.totals.input_tokens;
+			totals.cached_input_tokens +=
+				attempt.totals.cached_input_tokens;
+			totals.reasoning_tokens += attempt.totals.reasoning_tokens;
+			totals.non_reasoning_output_tokens +=
+				attempt.totals.non_reasoning_output_tokens;
+			totals.output_tokens += attempt.totals.output_tokens;
+			totals.total_tokens += attempt.totals.total_tokens;
+			totals.generation_time_ms += attempt.totals.generation_time_ms;
+			return totals;
+		},
+		{
+			input_tokens: 0,
+			cached_input_tokens: 0,
+			reasoning_tokens: 0,
+			non_reasoning_output_tokens: 0,
+			output_tokens: 0,
+			total_tokens: 0,
+			generation_time_ms: 0,
+		},
+	);
+}
+
+export function saveTaskTokenUsageAttempt(params: {
+	tokenUsageDir: string;
+	taskNumber: number;
+	task: string;
+	attempt: TokenUsageArtifactAttempt;
+}): void {
+	fs.mkdirSync(params.tokenUsageDir, { recursive: true });
+	const taskLabel = String(params.taskNumber).padStart(3, "0");
+	const filePath = path.join(
+		params.tokenUsageDir,
+		`task-${taskLabel}.json`,
+	);
+	let attempts: TokenUsageArtifactAttempt[] = [];
+	if (fs.existsSync(filePath)) {
+		const existing = JSON.parse(
+			fs.readFileSync(filePath, "utf-8"),
+		) as Partial<TaskTokenUsageArtifact>;
+		if (
+			existing.schemaVersion !== 1 ||
+			existing.taskIndex !== params.taskNumber ||
+			!Array.isArray(existing.attempts)
+		) {
+			throw new Error(`Invalid token usage artifact: ${filePath}`);
+		}
+		attempts = existing.attempts;
+	}
+	const existingIndex = attempts.findIndex(
+		(attempt) => attempt.runIndex === params.attempt.runIndex,
+	);
+	if (existingIndex >= 0) {
+		attempts[existingIndex] = params.attempt;
+	} else {
+		attempts.push(params.attempt);
+	}
+	attempts.sort((left, right) => left.runIndex - right.runIndex);
+	const artifact: TaskTokenUsageArtifact = {
+		schemaVersion: 1,
+		taskIndex: params.taskNumber,
+		task: params.task,
+		attempts,
+		totals: sumArtifactAttemptTotals(attempts),
+	};
+	const tempPath = `${filePath}.${process.pid}.tmp`;
+	try {
+		fs.writeFileSync(
+			tempPath,
+			`${JSON.stringify(artifact, null, 2)}\n`,
+			"utf-8",
+		);
+		fs.renameSync(tempPath, filePath);
+	} finally {
+		if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+	}
 }
 
 function saveDomContext(params: {
@@ -54,11 +140,20 @@ function saveDomContext(params: {
 
 function createRunTaskPersistence(params: {
 	taskNumber: number;
+	task: string;
 	taskMessagesPath: string;
+	tokenUsageDir: string;
 }): RunTaskPersistenceCallbacks {
 	return {
 		appendJsonlEntry: (entry) =>
 			appendJsonlEntry(params.taskMessagesPath, entry),
+		saveTokenUsageAttempt: (attempt) =>
+			saveTaskTokenUsageAttempt({
+				tokenUsageDir: params.tokenUsageDir,
+				taskNumber: params.taskNumber,
+				task: params.task,
+				attempt,
+			}),
 		savePlanningDom: ({ dom, runIndex, attempt }) =>
 			saveDomContext({
 				taskNumber: params.taskNumber,
@@ -191,6 +286,10 @@ export async function main(
 	const taskLogsDir = path.join(
 		path.dirname(stepMessagesJsonlPath),
 		"task-logs",
+	);
+	const tokenUsageDir = path.join(
+		path.dirname(stepMessagesJsonlPath),
+		"tokenUsage",
 	);
 	let configuredTasks = configTasks;
 
@@ -404,6 +503,7 @@ export async function main(
 	console.log(`Save steps/context: ${saveStepsContext}`);
 	console.log(`Save task logs: ${saveTaskLogs}`);
 	console.log(`Step messages JSONL path: ${stepMessagesJsonlPath}`);
+	console.log(`Token usage directory: ${tokenUsageDir}`);
 	console.log(
 		`Task execution overrides path: ${taskExecutionOverridesPath ?? "disabled"}`,
 	);
@@ -478,7 +578,9 @@ export async function main(
 					port = await taskDebugPortAllocator.acquirePort();
 					const persistence = createRunTaskPersistence({
 						taskNumber: configIndex,
+						task,
 						taskMessagesPath: getTaskMessagesPath(configIndex),
+						tokenUsageDir,
 					});
 					const runTaskResult = await withTaskLogContext(
 						configIndex,

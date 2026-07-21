@@ -17,8 +17,6 @@ export interface ConfigFeatureFlags {
 	optimizeExecutorStepDelays: boolean;
 	/** Insert text in bulk for safe fields instead of typing one character at a time. */
 	optimizeTextInput: boolean;
-	/** Hide raw href attributes and their URL values from model-facing DOM context. */
-	removeHrefsFromInputContext: boolean;
 }
 
 export const configFeatureFlags: ConfigFeatureFlags = {
@@ -31,7 +29,6 @@ export const configFeatureFlags: ConfigFeatureFlags = {
 	websiteAPIficationTools: false,
 	optimizeExecutorStepDelays: false,
 	optimizeTextInput: false,
-	removeHrefsFromInputContext: false,
 };
 
 export function mergeConfigFeatureFlags(
@@ -72,12 +69,6 @@ export function mergeConfigFeatureFlags(
 		...(overrides.optimizeTextInput !== undefined
 			? { optimizeTextInput: overrides.optimizeTextInput }
 			: {}),
-		...(overrides.removeHrefsFromInputContext !== undefined
-			? {
-					removeHrefsFromInputContext:
-						overrides.removeHrefsFromInputContext,
-				}
-			: {}),
 	};
 }
 
@@ -114,9 +105,5 @@ export function setConfigFeatureFlags(
 	}
 	if (flags.optimizeTextInput !== undefined) {
 		configFeatureFlags.optimizeTextInput = flags.optimizeTextInput;
-	}
-	if (flags.removeHrefsFromInputContext !== undefined) {
-		configFeatureFlags.removeHrefsFromInputContext =
-			flags.removeHrefsFromInputContext;
 	}
 }
