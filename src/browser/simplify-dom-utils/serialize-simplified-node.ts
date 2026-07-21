@@ -456,6 +456,13 @@ export function serializeSimplifiedNode(
 	options: SerializeSimplifiedNodeOptions = {},
 ): string {
 	const indent = "  ".repeat(depth);
+	if (node.outsideViewport) {
+		const bid = getAttrValue(node.attrs, "bid");
+		if (!bid) {
+			throw new Error("Outside-viewport placeholders require a bid");
+		}
+		return `${indent}content-hidden-outside-viewport bid="${bid}" scroll-delta-y="${node.outsideViewport.scrollDeltaY}"`;
+	}
 	if (node.couldBeHidden && !inCouldBeHiddenContext) {
 		return [
 			`${indent}couldBeHidden`,

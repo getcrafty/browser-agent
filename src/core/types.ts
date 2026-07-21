@@ -277,6 +277,7 @@ export interface CreatePromptForStepResult {
 	};
 	artifacts: {
 		preStepScreenshotDataUrl?: string;
+		canonicalSimplifiedDom: string;
 	};
 	context: {
 		current_url: string;

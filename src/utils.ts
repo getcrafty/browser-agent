@@ -50,6 +50,7 @@ export interface StageLLMOverride {
 	maxModelLen?: number;
 	reserveOutputTokens?: number;
 	endpointUrl?: string;
+	openrouterProvider?: string;
 }
 
 export interface StageLLMOverrides {
@@ -261,6 +262,18 @@ function parseOptionalEndpointSettings(
 				? endpointUrlInput.trim()
 				: undefined,
 	};
+}
+
+function parseOptionalOpenRouterProvider(
+	source: Record<string, unknown>,
+	fullPath: string,
+	context: string,
+): string | undefined {
+	return parseOptionalNonEmptyString(
+		pickFirstDefined(source, ["openrouter_provider", "openrouterProvider"]),
+		fullPath,
+		`${context} openrouter_provider`,
+	);
 }
 
 function asRecord(
@@ -535,6 +548,11 @@ function parseStageLLMOverride(
 		fullPath,
 		`stage '${stage}'`,
 	);
+	const openrouterProvider = parseOptionalOpenRouterProvider(
+		stageRecord,
+		fullPath,
+		`stage '${stage}'`,
+	);
 
 	if (
 		provider === undefined &&
@@ -542,10 +560,11 @@ function parseStageLLMOverride(
 		reasoningEffort === undefined &&
 		maxModelLen === undefined &&
 		reserveOutputTokens === undefined &&
-		stageEndpointSettings.endpointUrl === undefined
+		stageEndpointSettings.endpointUrl === undefined &&
+		openrouterProvider === undefined
 	) {
 		failConfig(
-			`Invalid stage override for '${stage}' in config: ${fullPath}. Provide at least one of provider/model/reasoning_effort/max_model_len/reserve_output_tokens/endpoint_url fields.`,
+			`Invalid stage override for '${stage}' in config: ${fullPath}. Provide at least one of provider/model/reasoning_effort/max_model_len/reserve_output_tokens/endpoint_url/openrouter_provider fields.`,
 		);
 	}
 
@@ -556,6 +575,7 @@ function parseStageLLMOverride(
 		...(maxModelLen !== undefined ? { maxModelLen } : {}),
 		...(reserveOutputTokens !== undefined ? { reserveOutputTokens } : {}),
 		...stageEndpointSettings,
+		...(openrouterProvider !== undefined ? { openrouterProvider } : {}),
 	};
 }
 
@@ -619,13 +639,26 @@ function resolveStageLLMOptions(
 			`Invalid config file: ${fullPath}. Missing model for stage '${stage}'. Define stage_llms.${stage}.model (or set a default provider/model).`,
 		);
 	}
+	const canInheritDefaultReasoning =
+		provider !== "openrouter" ||
+		(override?.provider === undefined && override?.model === undefined);
 	const reasoningEffort =
 		override?.reasoningEffort ??
-		defaultLLM?.reasoningEffort ??
+		(canInheritDefaultReasoning
+			? defaultLLM?.reasoningEffort
+			: undefined) ??
 		getReasoningModelCapability(provider, model)?.defaultReasoningEffort;
 	if (!reasoningEffort) {
 		failConfig(
 			`Invalid config file: ${fullPath}. Missing reasoning_effort for stage '${stage}'. Define stage_llms.${stage}.reasoning_effort (or set a default reasoning_effort).`,
+		);
+	}
+	const openrouterProvider =
+		override?.openrouterProvider ??
+		(provider === "openrouter" ? defaultLLM?.openrouterProvider : undefined);
+	if (openrouterProvider !== undefined && provider !== "openrouter") {
+		failConfig(
+			`Invalid openrouter_provider for stage '${stage}' in config: ${fullPath}. openrouter_provider can only be used with provider 'openrouter'.`,
 		);
 	}
 
@@ -648,6 +681,7 @@ function resolveStageLLMOptions(
 				}
 			: {}),
 		endpointUrl: override?.endpointUrl ?? defaultLLM?.endpointUrl,
+		...(openrouterProvider !== undefined ? { openrouterProvider } : {}),
 	};
 	try {
 		validateReasoningConfiguration(resolved);
@@ -776,6 +810,11 @@ export function loadConfig(configPath: string): Config {
 		fullPath,
 		"default reasoning_effort",
 	);
+	const defaultOpenRouterProvider = parseOptionalOpenRouterProvider(
+		llmSource,
+		fullPath,
+		"default",
+	);
 	if (hasDefaultProvider && hasDefaultModel) {
 		const provider = parseProviderValue(
 			providerInput,
@@ -790,6 +829,11 @@ export function loadConfig(configPath: string): Config {
 		if (!model) {
 			failConfig(
 				`Invalid default model in config: ${fullPath}. Use a non-empty string.`,
+			);
+		}
+		if (defaultOpenRouterProvider !== undefined && provider !== "openrouter") {
+			failConfig(
+				`Invalid default openrouter_provider in config: ${fullPath}. openrouter_provider can only be used with provider 'openrouter'.`,
 			);
 		}
 		const defaultEndpointSettings = parseOptionalEndpointSettings(
@@ -822,11 +866,24 @@ export function loadConfig(configPath: string): Config {
 			...(defaultReserveOutputTokens !== undefined
 				? { reserveOutputTokens: defaultReserveOutputTokens }
 				: {}),
+			...(defaultOpenRouterProvider !== undefined
+				? { openrouterProvider: defaultOpenRouterProvider }
+				: {}),
 			...defaultEndpointSettings,
 		};
 		validateResolvedPromptBudget(defaultLLM, fullPath, "default");
-	} else if (defaultReasoningEffort !== undefined) {
-		defaultLLM = { reasoningEffort: defaultReasoningEffort };
+	} else if (
+		defaultReasoningEffort !== undefined ||
+		defaultOpenRouterProvider !== undefined
+	) {
+		defaultLLM = {
+			...(defaultReasoningEffort !== undefined
+				? { reasoningEffort: defaultReasoningEffort }
+				: {}),
+			...(defaultOpenRouterProvider !== undefined
+				? { openrouterProvider: defaultOpenRouterProvider }
+				: {}),
+		};
 	}
 
 	const stageOverridesInput = pickFirstDefined(raw, STAGE_OVERRIDE_ROOT_KEYS);
@@ -884,7 +941,10 @@ export function loadConfig(configPath: string): Config {
 			fullPath,
 			{
 				...DEFAULT_DATA_EXTRACTION_LLM,
-				...(defaultLLM?.reasoningEffort !== undefined
+				...((defaultLLM?.provider === undefined ||
+					defaultLLM.provider ===
+						DEFAULT_DATA_EXTRACTION_LLM.provider) &&
+				defaultLLM?.reasoningEffort !== undefined
 					? { reasoningEffort: defaultLLM.reasoningEffort }
 					: {}),
 			},

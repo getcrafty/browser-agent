@@ -34,7 +34,7 @@ describe("extractDataResultsFromSnapshot", () => {
 		__setProviderOverrideForTests("openai", null);
 	});
 
-	it("annotates direct hrefs in DOM order and resolves selected IDs", async () => {
+	it("keeps hrefs alongside link IDs and resolves selected IDs", async () => {
 		const traces: StageModelInvocationTrace[] = [];
 		let prompt = "";
 		let calls = 0;

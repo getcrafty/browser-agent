@@ -45,6 +45,28 @@ test("creates private files and preserves caller-owned directories", async () =>
 	}
 });
 
+test("forwards the OpenRouter provider constraint", async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "ts-openrouter-config-"));
+	try {
+		const files = await createRuntimeFiles(
+			resolveOptions({
+				provider: "openrouter",
+				model: "z-ai/glm-5.2",
+				reasoningEffort: "xhigh",
+				apiKey: "secret",
+				openrouterProvider: "baseten/fp8",
+				downloadDirectory: path.join(root, "downloads"),
+			}),
+			[{ task: "go" }],
+		);
+		const config = JSON.parse(fs.readFileSync(files.configPath, "utf8"));
+		assert.equal(config.openrouter_provider, "baseten/fp8");
+		await files.cleanup();
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("normalizes platforms and resolves executable bundles", async () => {
 	assert.equal(platformKey(), `${process.platform}-${process.arch}`);
 	assert.equal(bundledExecutable("aix", "ppc64"), "");

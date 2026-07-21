@@ -1,9 +1,11 @@
+import yaml from "js-yaml";
 import type {
 	LLMOptions,
 	Message,
 	ScreenshotToolCaptureCall,
 } from "../agents/types.js";
 import type { buildStepMessages } from "../agents/executor-utils/step-execution.js";
+import { stripDomContextFromHistoryPayload } from "../agents/executor-utils/history-payload.js";
 
 const HTML_TRUNCATION_MARKER = "\n...[truncated for context budget]...\n";
 const VLLM_PROMPT_BUDGET_SAFETY_MARGIN_TOKENS = 4096;
@@ -17,6 +19,10 @@ export interface FitStepPromptToBudgetInput {
 	estimateTokenCount: (text: string) => number;
 	screenshotToolSignalCaptures?: ScreenshotToolCaptureCall[];
 	currentPageScreenshotDataUrl?: string;
+	incrementalDomContext?: {
+		enabled: boolean;
+		canonicalHtml: string;
+	};
 }
 
 export interface FitStepPromptToBudgetResult {
@@ -101,6 +107,26 @@ function maybeOmitCurrentPageScreenshotFlag(
 	const nextPayload = { ...payload };
 	delete nextPayload.currentPageScreenshotIncludedAsImagePart;
 	return nextPayload;
+}
+
+function stripDomContextFromHistoryMessages(history: Message[]): Message[] {
+	return history.map((message) => {
+		if (message.role !== "user" || typeof message.content !== "string") {
+			return message;
+		}
+		let parsed: unknown;
+		try {
+			parsed = yaml.load(message.content);
+		} catch {
+			return message;
+		}
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return message;
+		}
+		const payload = { ...(parsed as Record<string, unknown>) };
+		stripDomContextFromHistoryPayload(payload);
+		return { ...message, content: yaml.dump(payload) };
+	});
 }
 
 function buildAndCountMessages(params: {
@@ -202,6 +228,28 @@ export function fitStepPromptToBudget(
 				currentPageScreenshotDataUrl,
 			};
 		}
+	}
+
+	if (
+		input.incrementalDomContext?.enabled &&
+		payload.htmlContextMode === "diff" &&
+		built.tokenCount > maxInputTokens
+	) {
+		history = stripDomContextFromHistoryMessages(history);
+		payload = {
+			...payload,
+			htmlContextMode: "full",
+			html: input.incrementalDomContext.canonicalHtml,
+		};
+		built = buildAndCountMessages({
+			systemPrompt: input.systemPrompt,
+			history,
+			payload,
+			buildStepMessages: input.buildStepMessages,
+			estimateTokenCount: input.estimateTokenCount,
+			screenshotToolSignalCaptures,
+			currentPageScreenshotDataUrl,
+		});
 	}
 
 	while (history.length > 0 && built.tokenCount > maxInputTokens) {

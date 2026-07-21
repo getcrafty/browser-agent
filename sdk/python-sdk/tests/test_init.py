@@ -26,7 +26,8 @@ class AgentTests(unittest.TestCase):
         parameters = inspect.signature(BrowserAgent).parameters
         self.assertEqual(list(parameters), [
             "provider", "model", "download_directory", "reasoning_effort", "api_key",
-            "endpoint_url", "headless", "executable_path", "workspace_directory",
+            "endpoint_url", "openrouter_provider", "headless", "executable_path",
+            "workspace_directory",
             "user_takeover_tool", "max_steps", "concurrency", "runs_per_task",
             "retry_count", "on_log",
         ])

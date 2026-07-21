@@ -12,4 +12,9 @@ export interface SimplifiedNode {
 	scrollEnabled?: boolean;
 	/** Present when content currently overflows client bounds on at least one axis. */
 	scrollable?: boolean;
+	/** Present when this node represents an omitted subtree outside the viewport overscan. */
+	outsideViewport?: {
+		direction: "above" | "below";
+		scrollDeltaY: number;
+	};
 }

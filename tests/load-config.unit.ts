@@ -68,7 +68,50 @@ tasks:
 
 		assert.include(
 			error,
-			"Use one of: openai, vllm, together, anthropic, google.",
+			"Use one of: openai, vllm, together, anthropic, google, openrouter.",
+		);
+	});
+
+	it("parses and inherits an OpenRouter provider constraint", () => {
+		const configPath = writeTempConfig(`
+provider: openrouter
+model: z-ai/glm-5.2
+reasoning_effort: xhigh
+openrouter_provider: baseten/fp8
+concurrency: 1
+tasks:
+  - "test task"
+`);
+
+		const config = loadConfig(configPath);
+
+		assert.equal(
+			config.stageLLMs.createPlan.openrouterProvider,
+			"baseten/fp8",
+		);
+		assert.equal(
+			config.stageLLMs.runAgent.openrouterProvider,
+			"baseten/fp8",
+		);
+		assert.equal(
+			config.stageLLMs.verifySuccess.openrouterProvider,
+			"baseten/fp8",
+		);
+	});
+
+	it("rejects openrouter_provider with another provider", () => {
+		const error = captureLoadConfigFailure(`
+provider: openai
+model: gpt-5.2
+openrouter_provider: baseten
+concurrency: 1
+tasks:
+  - "test task"
+`);
+
+		assert.include(
+			error,
+			"openrouter_provider can only be used with provider 'openrouter'",
 		);
 	});
 
@@ -444,6 +487,28 @@ tasks:
 		const config = loadConfig(configPath);
 
 		assert.equal(config.stageLLMs.runAgent.reasoningEffort, "high");
+	});
+
+	it("accepts arbitrary OpenRouter models with explicit reasoning", () => {
+		const configPath = writeTempConfig(
+			`
+provider: openrouter
+model: vendor/new-model
+reasoning_effort: xhigh
+concurrency: 1
+tasks:
+  - "test task"
+`,
+			false,
+		);
+
+		const config = loadConfig(configPath);
+
+		assert.deepInclude(config.stageLLMs.runAgent, {
+			provider: "openrouter",
+			model: "vendor/new-model",
+			reasoningEffort: "xhigh",
+		});
 	});
 
 	it("rejects unknown and unsupported reasoning model configurations", () => {

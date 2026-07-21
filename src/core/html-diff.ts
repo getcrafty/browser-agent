@@ -180,3 +180,50 @@ export function buildHtmlUnifiedDiff(
 	];
 	return formatUnifiedDiff(ops, DEFAULT_CONTEXT_LINES);
 }
+
+export type IncrementalHtmlContext =
+	| {
+			mode: "full";
+			html: string;
+			diffLength: number | null;
+	  }
+	| {
+			mode: "diff";
+			html: string;
+			diffLength: number;
+	  };
+
+export function resolveIncrementalHtmlContext(params: {
+	previousHtml?: string;
+	currentHtml: string;
+	maxDiffToFullRatio?: number;
+}): IncrementalHtmlContext {
+	const maxDiffToFullRatio = params.maxDiffToFullRatio ?? 0.5;
+	if (
+		typeof params.previousHtml !== "string" ||
+		params.previousHtml.length === 0
+	) {
+		return {
+			mode: "full",
+			html: params.currentHtml,
+			diffLength: null,
+		};
+	}
+	if (params.previousHtml === params.currentHtml) {
+		return { mode: "diff", html: "", diffLength: 0 };
+	}
+
+	const diff = buildHtmlUnifiedDiff(params.previousHtml, params.currentHtml);
+	if (
+		diff === null ||
+		params.currentHtml.length === 0 ||
+		diff.length > params.currentHtml.length * maxDiffToFullRatio
+	) {
+		return {
+			mode: "full",
+			html: params.currentHtml,
+			diffLength: diff?.length ?? null,
+		};
+	}
+	return { mode: "diff", html: diff, diffLength: diff.length };
+}

@@ -33,6 +33,7 @@ import {
 } from "./simplify-dom-utils/stamp-data-bids-on-live-dom.js";
 import type { SimplifiedNode } from "./simplify-dom-utils/simplified-node.js";
 import { shouldLogTimingDuration } from "../timing-logs.js";
+import { featureFlags } from "../featureFlags.js";
 
 export { CONTEXT_DIR, pruneLargeHiddenHierarchies };
 
@@ -49,6 +50,18 @@ const MAX_IFRAME_ATTRIBUTE_VALUE_LENGTH = 1000;
 const REDACTED_INPUT_VALUE = "[REDACTED]";
 const MAX_FALLBACK_PREVIEW_LENGTH = 280;
 const MAX_FALLBACK_LINE_LENGTH = 400;
+
+interface ViewportCullBounds {
+	viewportTop: number;
+	viewportBottom: number;
+	overscanTop: number;
+	overscanBottom: number;
+}
+
+interface OutsideViewport {
+	direction: "above" | "below";
+	scrollDeltaY: number;
+}
 
 type DownloadableHint = "true" | "false" | "unknown";
 
@@ -158,6 +171,77 @@ function normalizeHrefAttrValue(
 function getSnapshotString(strings: string[], idx: number | undefined): string {
 	if (idx === undefined || idx < 0 || idx >= strings.length) return "";
 	return strings[idx] || "";
+}
+
+async function getViewportCullBounds(
+	b: Browser,
+): Promise<ViewportCullBounds | undefined> {
+	try {
+		const metrics = await b.Page.getLayoutMetrics();
+		const viewport = metrics.cssVisualViewport;
+		const viewportTop = viewport.pageY;
+		const viewportHeight = viewport.clientHeight;
+		if (
+			!Number.isFinite(viewportTop) ||
+			!Number.isFinite(viewportHeight) ||
+			viewportHeight <= 0
+		) {
+			return undefined;
+		}
+		const viewportBottom = viewportTop + viewportHeight;
+		return {
+			viewportTop,
+			viewportBottom,
+			overscanTop: viewportTop - viewportHeight * 0.5,
+			overscanBottom: viewportBottom + viewportHeight * 0.5,
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function buildDocumentRootOffsetY(
+	documents: Protocol.DOMSnapshot.DocumentSnapshot[],
+): Map<number, number> {
+	const offsets = new Map<number, number>([[0, 0]]);
+	let changed = true;
+
+	while (changed) {
+		changed = false;
+		for (
+			let parentDocumentIndex = 0;
+			parentDocumentIndex < documents.length;
+			parentDocumentIndex++
+		) {
+			const parentOffset = offsets.get(parentDocumentIndex);
+			if (parentOffset === undefined) continue;
+			const parentDocument = documents[parentDocumentIndex];
+			const contentDocuments = parentDocument.nodes.contentDocumentIndex;
+			if (!contentDocuments) continue;
+			const layoutByNode = buildLayoutByNode(parentDocument.layout);
+
+			for (let i = 0; i < contentDocuments.index.length; i++) {
+				const childDocumentIndex = contentDocuments.value[i];
+				if (offsets.has(childDocumentIndex)) continue;
+				const ownerNodeIndex = contentDocuments.index[i];
+				const ownerLayoutIndex = layoutByNode.get(ownerNodeIndex);
+				if (ownerLayoutIndex === undefined) continue;
+				const ownerBounds =
+					parentDocument.layout.bounds[ownerLayoutIndex];
+				const ownerTop = ownerBounds?.[1];
+				const childDocument = documents[childDocumentIndex];
+				if (!Number.isFinite(ownerTop) || !childDocument) continue;
+				const childScrollOffsetY = childDocument.scrollOffsetY ?? 0;
+				offsets.set(
+					childDocumentIndex,
+					parentOffset + ownerTop - childScrollOffsetY,
+				);
+				changed = true;
+			}
+		}
+	}
+
+	return offsets;
 }
 
 function getDocumentUrl(
@@ -687,6 +771,7 @@ interface BuildNodeContext {
 	isInteractive: DomSnapshotHelpers["isInteractive"];
 	noClickAllowedCursor: DomSnapshotHelpers["noClickAllowedCursor"];
 	getRareString: DomSnapshotHelpers["getRareString"];
+	getOutsideViewport: (nodeIndex: number) => OutsideViewport | undefined;
 	scrollableByNodeIndex: Map<number, boolean>;
 	nextBid: () => string;
 	nextNonClickableId: () => string;
@@ -715,6 +800,7 @@ interface PreparedDocumentContext {
 	isInteractive: DomSnapshotHelpers["isInteractive"];
 	noClickAllowedCursor: DomSnapshotHelpers["noClickAllowedCursor"];
 	getRareString: DomSnapshotHelpers["getRareString"];
+	getOutsideViewport: (nodeIndex: number) => OutsideViewport | undefined;
 	scrollableByNodeIndex: Map<number, boolean>;
 	isWikipediaWebsite: boolean;
 }
@@ -738,8 +824,18 @@ async function prepareDocumentContext(params: {
 	documentIndex: number;
 	strings: string[];
 	isWikipediaWebsite: boolean;
+	documentRootOffsetY: number | undefined;
+	viewportCullBounds: ViewportCullBounds | undefined;
 }): Promise<PreparedDocumentContext> {
-	const { b, doc, documentIndex, strings, isWikipediaWebsite } = params;
+	const {
+		b,
+		doc,
+		documentIndex,
+		strings,
+		isWikipediaWebsite,
+		documentRootOffsetY,
+		viewportCullBounds,
+	} = params;
 	const { nodes, layout } = doc;
 	const nodeCount = nodes.nodeType?.length ?? 0;
 	const layoutByNode = buildLayoutByNode(layout);
@@ -770,6 +866,44 @@ async function prepareDocumentContext(params: {
 	});
 	const liveInputValuesByNodeIndex = await getLiveInputValuesByNodeIndex();
 	const scrollableByNodeIndex = await getScrollableByNodeIndex();
+	const getOutsideViewport = (
+		nodeIndex: number,
+	): OutsideViewport | undefined => {
+		if (!viewportCullBounds || documentRootOffsetY === undefined) {
+			return undefined;
+		}
+		const layoutIndex = layoutByNode.get(nodeIndex);
+		if (layoutIndex === undefined) return undefined;
+		const bounds = layout.bounds[layoutIndex];
+		const localTop = bounds?.[1];
+		const height = bounds?.[3];
+		if (
+			!Number.isFinite(localTop) ||
+			!Number.isFinite(height) ||
+			height <= 0
+		) {
+			return undefined;
+		}
+		const top = documentRootOffsetY + localTop;
+		const bottom = top + height;
+		if (bottom < viewportCullBounds.overscanTop) {
+			return {
+				direction: "above",
+				scrollDeltaY: Math.floor(
+					bottom - viewportCullBounds.viewportTop,
+				),
+			};
+		}
+		if (top > viewportCullBounds.overscanBottom) {
+			return {
+				direction: "below",
+				scrollDeltaY: Math.ceil(
+					top - viewportCullBounds.viewportBottom,
+				),
+			};
+		}
+		return undefined;
+	};
 
 	return {
 		documentIndex,
@@ -787,6 +921,7 @@ async function prepareDocumentContext(params: {
 		isInteractive,
 		noClickAllowedCursor,
 		getRareString,
+		getOutsideViewport,
 		scrollableByNodeIndex,
 		isWikipediaWebsite,
 	};
@@ -842,6 +977,7 @@ function buildNode(
 		isInteractive,
 		noClickAllowedCursor,
 		getRareString,
+		getOutsideViewport,
 		scrollableByNodeIndex,
 		nextBid,
 		nextNonClickableId,
@@ -899,6 +1035,7 @@ function buildNode(
 	const noClickAllowed = interactive && noClickAllowedCursor(i);
 	const hasScrollEnabledOverflow = scrollEnabled(i);
 	const scrollable = scrollableByNodeIndex.get(i) === true;
+	const outsideViewport = getOutsideViewport(i);
 	const allowBidOnNode = tag !== "BODY";
 
 	// Recursively build children
@@ -1039,6 +1176,40 @@ function buildNode(
 		attrs.push(["value", v]);
 	}
 
+	const subtreeIsOutsideInSameDirection =
+		outsideViewport !== undefined &&
+		elementChildren.every(
+			(child) =>
+				child.outsideViewport?.direction === outsideViewport.direction,
+		);
+	if (
+		featureFlags.hideOffscreenDomContent &&
+		allowBidOnNode &&
+		subtreeIsOutsideInSameDirection
+	) {
+		let markerBid = attrs.find(([name]) => name === "bid")?.[1];
+		if (!markerBid) {
+			const backendNodeId = nodes.backendNodeId?.[i];
+			if (!backendNodeId) {
+				markerBid = undefined;
+			} else {
+				markerBid = nextBid();
+				bidStamps.push({ backendNodeId, bid: markerBid });
+			}
+		}
+		if (markerBid) {
+			return {
+				tag: "content-hidden-outside-viewport",
+				attrs: [["bid", markerBid]],
+				text: "",
+				children: [],
+				isHidden: hidden,
+				isInteractive: false,
+				outsideViewport,
+			};
+		}
+	}
+
 	// Collapse wrappers only when they are fully transparent.
 	if (attrs.length === 0 && !text && elementChildren.length === 1) {
 		return elementChildren[0];
@@ -1106,6 +1277,9 @@ export async function getSimplifiedDOM(
 			.filter(Boolean),
 	);
 	const redactPasswordInputs = options.redactPasswordInputs === true;
+	const viewportCullBounds = featureFlags.hideOffscreenDomContent
+		? await getViewportCullBounds(b)
+		: undefined;
 	let capturedDocumentCount = 0;
 	const snap = await timeSimplifyDomPhase(
 		{
@@ -1137,6 +1311,9 @@ export async function getSimplifiedDOM(
 	}
 	const rootDocumentUrl = getDocumentUrl(snap.documents[0], strings);
 	const isWikipediaWebsite = isWikipediaWebsiteUrl(rootDocumentUrl);
+	const documentRootOffsetsY = viewportCullBounds
+		? buildDocumentRootOffsetY(snap.documents)
+		: new Map<number, number>();
 
 	const documentIndices = snap.documents.map((_, index) => index);
 
@@ -1156,6 +1333,9 @@ export async function getSimplifiedDOM(
 						documentIndex,
 						strings,
 						isWikipediaWebsite,
+						documentRootOffsetY:
+							documentRootOffsetsY.get(documentIndex),
+						viewportCullBounds,
 					}),
 				),
 			);
@@ -1213,6 +1393,7 @@ export async function getSimplifiedDOM(
 					isInteractive: doc.isInteractive,
 					noClickAllowedCursor: doc.noClickAllowedCursor,
 					getRareString: doc.getRareString,
+					getOutsideViewport: doc.getOutsideViewport,
 					scrollableByNodeIndex: doc.scrollableByNodeIndex,
 					nextBid,
 					nextNonClickableId,

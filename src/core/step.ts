@@ -41,7 +41,8 @@ import {
 } from "./run-agent-loop-state.js";
 import { shouldLogTimingDuration } from "../timing-logs.js";
 import { featureFlags } from "../featureFlags.js";
-import { shouldUseExecutorReasoningTraceContext } from "../agents/prompts.js";
+import { shouldIncludeExecutorReasoningHistory } from "../agents/prompts.js";
+import { resolveIncrementalHtmlContext } from "./html-diff.js";
 
 const PRE_STEP_SCREENSHOT_STALE_NODE_RETRY_COUNT = 2;
 const PRE_STEP_SCREENSHOT_STALE_NODE_RETRY_DELAY_MS = 150;
@@ -65,6 +66,43 @@ function getSessionOrThrow(deps: CoreDeps, port: number): BrowserSession {
 		throw new SessionNotFoundError(port);
 	}
 	return session;
+}
+
+function prepareCommittedIncrementalDomSnapshot(
+	session: BrowserSession,
+	historyLength: number,
+): string | undefined {
+	if (!featureFlags.incrementalDomContext) {
+		session.incrementalDomContext = {};
+		return undefined;
+	}
+
+	const state = session.incrementalDomContext;
+	const pending = state.pending;
+	if (pending) {
+		if (historyLength === pending.sourceHistoryLength + 1) {
+			state.committed = {
+				...pending,
+				sourceHistoryLength: historyLength,
+			};
+			state.pending = undefined;
+		} else if (historyLength === pending.sourceHistoryLength) {
+			state.pending = undefined;
+		} else {
+			session.incrementalDomContext = {};
+			return undefined;
+		}
+	}
+	if (
+		state.committed &&
+		state.committed.sourceHistoryLength > historyLength
+	) {
+		session.incrementalDomContext = {};
+		return undefined;
+	}
+	return state.committed?.canDiffFrom
+		? state.committed.canonicalHtml
+		: undefined;
 }
 
 function shouldProtectAuthContext(session: BrowserSession): boolean {
@@ -367,21 +405,9 @@ async function createPromptForStepImpl(
 
 	session.lastTask = input.userTask;
 
-	let history: ReturnType<typeof buildHistoryMessagesFromFullStepHistory> =
-		[];
-	history = timeStateExtractionPhaseSync(
-		{
-			stepNumber: input.stepNumber,
-			phase: "buildHistoryMessages",
-			detail: () => `history_messages=${history.length}`,
-		},
-		() => {
-			history = buildHistoryMessagesFromFullStepHistory(
-				input.stepsHistory,
-				executorPromptOptions,
-			);
-			return history;
-		},
+	const previousCanonicalHtml = prepareCommittedIncrementalDomSnapshot(
+		session,
+		input.stepsHistory.length,
 	);
 	let currentUrl = await timeStateExtractionPhase(
 		{
@@ -714,6 +740,31 @@ async function createPromptForStepImpl(
 		...session.dataExtractionCoordinator.drainErrors(),
 	);
 
+	const incrementalHtmlContext = featureFlags.incrementalDomContext
+		? resolveIncrementalHtmlContext({
+				previousHtml: previousCanonicalHtml,
+				currentHtml: dom,
+			})
+		: undefined;
+	let history: ReturnType<typeof buildHistoryMessagesFromFullStepHistory> =
+		[];
+	history = timeStateExtractionPhaseSync(
+		{
+			stepNumber: input.stepNumber,
+			phase: "buildHistoryMessages",
+			detail: () => `history_messages=${history.length}`,
+		},
+		() => {
+			history = buildHistoryMessagesFromFullStepHistory(
+				input.stepsHistory,
+				executorPromptOptions,
+				{
+					omitDomContext: incrementalHtmlContext?.mode === "full",
+				},
+			);
+			return history;
+		},
+	);
 	const payloadState = await timeStateExtractionPhase(
 		{
 			stepNumber: input.stepNumber,
@@ -734,7 +785,7 @@ async function createPromptForStepImpl(
 				websiteToolResults: configFeatureFlags.websiteAPIficationTools
 					? session.websiteToolResults
 					: undefined,
-				dom,
+				dom: incrementalHtmlContext?.html ?? dom,
 				currentTab,
 				openTabs: openTabs.map((tab) => deps.formatTabTitle(tab)),
 				newlyOpenedTabs: newlyOpenedTabs.map((tab) =>
@@ -758,6 +809,9 @@ async function createPromptForStepImpl(
 				validatorFeedback: input.validatorFeedback,
 			}),
 	);
+	if (incrementalHtmlContext) {
+		payloadState.payload.htmlContextMode = incrementalHtmlContext.mode;
+	}
 	if (input.finalizationInstruction) {
 		payloadState.payload.remainingSteps = 0;
 		payloadState.payload.maxStepFinalization = true;
@@ -813,6 +867,10 @@ async function createPromptForStepImpl(
 					session.screenshotToolSignalCaptures,
 				currentPageScreenshotDataUrl:
 					preStepScreenshotDataUrl || undefined,
+				incrementalDomContext: {
+					enabled: featureFlags.incrementalDomContext,
+					canonicalHtml: dom,
+				},
 			}),
 	);
 	payloadState.payload = fittedPrompt.payload;
@@ -830,6 +888,24 @@ async function createPromptForStepImpl(
 		detail: `tokens=${payloadState.payload.latestUserPromptTokenCount}`,
 	});
 	const messages = fittedPrompt.messages;
+	if (featureFlags.incrementalDomContext) {
+		const finalMode = payloadState.payload.htmlContextMode;
+		const finalHtml =
+			typeof payloadState.payload.html === "string"
+				? payloadState.payload.html
+				: "";
+		const expectedPromptHtml =
+			incrementalHtmlContext && finalMode === incrementalHtmlContext.mode
+				? incrementalHtmlContext.html
+				: dom;
+		session.incrementalDomContext.pending = {
+			canonicalHtml: dom,
+			sourceHistoryLength: input.stepsHistory.length,
+			canDiffFrom:
+				(finalMode === "full" || finalMode === "diff") &&
+				finalHtml === expectedPromptHtml,
+		};
+	}
 
 	session.previousStepTabs = openTabs;
 	const latestUserPromptTokenCount = Number(
@@ -843,6 +919,7 @@ async function createPromptForStepImpl(
 		},
 		artifacts: {
 			preStepScreenshotDataUrl: preStepScreenshotDataUrl || undefined,
+			canonicalSimplifiedDom: dom,
 		},
 		context: {
 			current_url: currentUrl,
@@ -927,7 +1004,11 @@ export async function browse(
 			: [],
 		redactPasswordInputs: protectAuthContext,
 	};
-	let simplifiedDomBeforeActions = input.simplifiedDom;
+	let simplifiedDomBeforeActions =
+		featureFlags.incrementalDomContext &&
+		session.incrementalDomContext.pending
+			? session.incrementalDomContext.pending.canonicalHtml
+			: input.simplifiedDom;
 	if (actions.some((action) => action.type === "extract_data")) {
 		try {
 			simplifiedDomBeforeActions = await deps.getSimplifiedDOM(
@@ -1220,9 +1301,16 @@ export async function processStepModelOutput(
 		payload: stripPayloadForHistory({
 			payload: input.promptPayload,
 			keepPlanInHistory: input.keepPlanInHistory ?? false,
+			incrementalDomContextEnabled: featureFlags.incrementalDomContext,
+			htmlContextMode:
+				input.promptPayload.htmlContextMode === "full" ||
+				input.promptPayload.htmlContextMode === "diff"
+					? input.promptPayload.htmlContextMode
+					: undefined,
+			stepsHistory: input.stepsHistory,
 		}),
 		assistant,
-		...(shouldUseExecutorReasoningTraceContext(executorPromptOptions) &&
+		...(shouldIncludeExecutorReasoningHistory(executorPromptOptions) &&
 		input.reasoningTokens?.trim()
 			? { reasoningTokens: input.reasoningTokens.trim() }
 			: {}),

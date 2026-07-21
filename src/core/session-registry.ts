@@ -47,6 +47,16 @@ export interface BrowserSession {
 	lastProgressSignature: string | null;
 	sameActionSignatureStreak: number;
 	noProgressStreak: number;
+	incrementalDomContext: {
+		committed?: IncrementalDomSnapshot;
+		pending?: IncrementalDomSnapshot;
+	};
+}
+
+export interface IncrementalDomSnapshot {
+	canonicalHtml: string;
+	sourceHistoryLength: number;
+	canDiffFrom: boolean;
 }
 
 export class SessionRegistry {

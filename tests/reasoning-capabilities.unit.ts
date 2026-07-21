@@ -8,6 +8,7 @@ import {
 import {
 	isProvider,
 	isReasoningEffort,
+	OPENROUTER_REASONING_EFFORTS,
 	REASONING_EFFORTS,
 	SUPPORTED_PROVIDERS,
 } from "../src/llm-capabilities.js";
@@ -22,11 +23,12 @@ describe("reasoning model capabilities", () => {
 
 	it("derives the global effort values from the model registry", () => {
 		const registeredEfforts = [
-			...new Set(
-				REASONING_MODEL_CAPABILITIES.flatMap((capability) => [
+			...new Set([
+				...OPENROUTER_REASONING_EFFORTS,
+				...REASONING_MODEL_CAPABILITIES.flatMap((capability) => [
 					...capability.reasoningEfforts,
 				]),
-			),
+			]),
 		];
 
 		assert.deepEqual(REASONING_EFFORTS, registeredEfforts);
@@ -133,6 +135,37 @@ describe("reasoning model capabilities", () => {
 				}),
 			"Allowed values: none, high, max",
 		);
+	});
+
+	it("requires and validates OpenRouter reasoning efforts for arbitrary models", () => {
+		for (const reasoningEffort of OPENROUTER_REASONING_EFFORTS) {
+			assert.doesNotThrow(() =>
+				validateReasoningConfiguration({
+					provider: "openrouter",
+					model: "vendor/changing-model-id",
+					reasoningEffort,
+				}),
+			);
+		}
+		assert.throws(
+			() =>
+				validateReasoningConfiguration({
+					provider: "openrouter",
+					model: "vendor/model",
+				}),
+			"Missing reasoning_effort",
+		);
+		for (const reasoningEffort of ["max", "enabled"] as const) {
+			assert.throws(
+				() =>
+					validateReasoningConfiguration({
+						provider: "openrouter",
+						model: "vendor/model",
+						reasoningEffort,
+					}),
+				"Allowed values: none, minimal, low, medium, high, xhigh",
+			);
+		}
 	});
 
 	it("leaves out-of-scope providers unchanged", () => {

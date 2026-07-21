@@ -80,13 +80,15 @@ function createMockBrowser(snapshot: any): any {
 }
 
 describe("simplify-dom wikipedia href normalization", () => {
-	it("serializes href as empty on wikipedia pages", async () => {
+	it("normalizes wikipedia hrefs while preserving anchors", async () => {
 		const browser = createMockBrowser(
 			makeSnapshotWithAnchor("https://en.wikipedia.org/wiki/Google"),
 		);
 		const simplified = await getSimplifiedDOM(browser);
 		assert.include(simplified, `href=""`);
 		assert.notInclude(simplified, `href="/wiki/Google"`);
+		assert.include(simplified, `bid="abc"`);
+		assert.include(simplified, "Google");
 	});
 
 	it("preserves the raw href on wikipedia pages when requested", async () => {
@@ -105,6 +107,18 @@ describe("simplify-dom wikipedia href normalization", () => {
 		);
 		const simplified = await getSimplifiedDOM(browser);
 		assert.include(simplified, `href="/wiki/Google"`);
+	});
+
+	it("normalizes javascript hrefs", async () => {
+		const browser = createMockBrowser(
+			makeSnapshotWithAnchor(
+				"https://example.com/page",
+				"javascript: void(0)",
+			),
+		);
+		const simplified = await getSimplifiedDOM(browser);
+		assert.include(simplified, `href=""`);
+		assert.notInclude(simplified, "javascript");
 	});
 
 	it("preserves complete raw href values for extraction", async () => {

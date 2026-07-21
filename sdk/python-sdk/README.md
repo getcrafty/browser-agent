@@ -47,6 +47,7 @@ All `BrowserAgent` constructor arguments are keyword-only.
 | `reasoning_effort`    | Model-dependent               | Required when the SDK has no built-in capability information for the model.      |
 | `api_key`             | Provider environment variable | API key for the model provider; whitespace-only values are ignored.              |
 | `endpoint_url`        | —                             | Absolute HTTP(S) endpoint; required for `vllm`.                                  |
+| `openrouter_provider` | —                             | OpenRouter inference provider to require, with fallbacks disabled.               |
 | `headless`            | `False`                       | Run Chromium without a visible window.                                           |
 | `executable_path`     | System Chromium               | Chrome or compatible Chromium executable.                                        |
 | `workspace_directory` | Temporary directory           | Agent file workspace; relative paths resolve from the current working directory. |
@@ -60,24 +61,41 @@ All `BrowserAgent` constructor arguments are keyword-only.
 
 ```python
 Provider: TypeAlias = Literal[
-    "openai", "vllm", "together", "anthropic", "google"
+    "openai", "vllm", "together", "anthropic", "google", "openrouter"
 ]
 
 ReasoningEffort: TypeAlias = Literal[
-    "none", "minimal", "low", "medium", "high", "max", "enabled"
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "enabled"
 ]
 ```
 
-| Provider and model                                                                             | API-key environment     | Reasoning values                           | Default   |
-| ---------------------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------ | --------- |
-| OpenAI `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-terra`, or `gpt-5.6-sol` | `OPENAI_API_KEY`        | `none`, `minimal`, `low`, `medium`, `high` | `low`     |
-| Together `zai-org/GLM-5.2`                                                                     | `TOGETHER_API_KEY`      | `none`, `high`, `max`                      | `high`    |
-| vLLM model containing `qwen`                                                                   | Optional `VLLM_API_KEY` | `none`, `enabled`                          | `enabled` |
-| vLLM model containing `glm`                                                                    | Optional `VLLM_API_KEY` | `none`                                     | `none`    |
-| Anthropic models                                                                               | `ANTHROPIC_API_KEY`     | Any `ReasoningEffort`                      | Required  |
-| Google models                                                                                  | `GOOGLE_API_KEY`        | Any `ReasoningEffort`                      | Required  |
+| Provider and model                                                                             | API-key environment     | Reasoning values                                    | Default   |
+| ---------------------------------------------------------------------------------------------- | ----------------------- | --------------------------------------------------- | --------- |
+| OpenAI `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-terra`, or `gpt-5.6-sol` | `OPENAI_API_KEY`        | `none`, `minimal`, `low`, `medium`, `high`          | `low`     |
+| Together `zai-org/GLM-5.2`                                                                     | `TOGETHER_API_KEY`      | `none`, `high`, `max`                               | `high`    |
+| vLLM model containing `qwen`                                                                   | Optional `VLLM_API_KEY` | `none`, `enabled`                                   | `enabled` |
+| vLLM model containing `glm`                                                                    | Optional `VLLM_API_KEY` | `none`                                              | `none`    |
+| Anthropic models                                                                               | `ANTHROPIC_API_KEY`     | Any `ReasoningEffort`                               | Required  |
+| Google models                                                                                  | `GOOGLE_API_KEY`        | Any `ReasoningEffort`                               | Required  |
+| OpenRouter models                                                                              | `OPENROUTER_API_KEY`    | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` | Required  |
 
 `vllm` additionally requires `endpoint_url`.
+
+For OpenRouter, use its organization-prefixed model ID and provide an explicit reasoning effort:
+
+```python
+agent = BrowserAgent(
+    provider="openrouter",
+    model="z-ai/glm-5.2",
+    reasoning_effort="xhigh",
+    openrouter_provider="baseten/fp8",
+    download_directory="./downloads",
+)
+```
+
+`openrouter_provider` is valid only with `provider="openrouter"`. It restricts
+OpenRouter routing to that provider and disables fallbacks.
+Exact endpoint IDs such as `baseten/fp8` are passed through unchanged.
 
 ## Task configuration
 

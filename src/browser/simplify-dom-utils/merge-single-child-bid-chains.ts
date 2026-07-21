@@ -85,6 +85,7 @@ export function mergeSingleChildBidChains(
 
 	while (node.children.length === 1) {
 		const child = node.children[0];
+		if (node.outsideViewport || child.outsideViewport) break;
 		const canMergeClickableImageChild =
 			node.isInteractive && child.tag === "img";
 		const parentBid = getAttrValue(node.attrs, "bid");

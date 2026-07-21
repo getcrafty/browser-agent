@@ -3,9 +3,11 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal, TypeAlias
 
-Provider: TypeAlias = Literal["openai", "vllm", "together", "anthropic", "google"]
+Provider: TypeAlias = Literal[
+    "openai", "vllm", "together", "anthropic", "google", "openrouter"
+]
 ReasoningEffort: TypeAlias = Literal[
-    "none", "minimal", "low", "medium", "high", "max", "enabled"
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "enabled"
 ]
 UserTakeoverCategory: TypeAlias = Literal[
     "authentication", "otp", "verification", "payment", "other"

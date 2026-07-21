@@ -4,6 +4,7 @@ export const SUPPORTED_PROVIDERS = [
 	"together",
 	"anthropic",
 	"google",
+	"openrouter",
 ] as const;
 
 export type Provider = (typeof SUPPORTED_PROVIDERS)[number];
@@ -25,6 +26,14 @@ const OPENAI_REASONING_EFFORTS = [
 const TOGETHER_GLM_REASONING_EFFORTS = ["none", "high", "max"] as const;
 const TOGGLE_REASONING_EFFORTS = ["none", "enabled"] as const;
 const DISABLED_REASONING_EFFORTS = ["none"] as const;
+export const OPENROUTER_REASONING_EFFORTS = [
+	"none",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+] as const;
 
 interface ReasoningModelCapabilityDefinition {
 	provider: Provider;
@@ -76,14 +85,16 @@ export type ReasoningModelCapability =
 	(typeof REASONING_MODEL_CAPABILITIES)[number];
 
 export type ReasoningEffort =
-	ReasoningModelCapability["reasoningEfforts"][number];
+	| ReasoningModelCapability["reasoningEfforts"][number]
+	| (typeof OPENROUTER_REASONING_EFFORTS)[number];
 
 export const REASONING_EFFORTS: readonly ReasoningEffort[] = [
-	...new Set(
-		REASONING_MODEL_CAPABILITIES.flatMap((capability) => [
+	...new Set([
+		...OPENROUTER_REASONING_EFFORTS,
+		...REASONING_MODEL_CAPABILITIES.flatMap((capability) => [
 			...capability.reasoningEfforts,
 		]),
-	),
+	] as ReasoningEffort[]),
 ];
 
 export function isReasoningEffort(value: unknown): value is ReasoningEffort {

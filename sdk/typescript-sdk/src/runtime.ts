@@ -133,6 +133,9 @@ export async function createRuntimeFiles(
 				...(options.endpointUrl && {
 					endpoint_url: options.endpointUrl,
 				}),
+				...(options.openrouterProvider && {
+					openrouter_provider: options.openrouterProvider,
+				}),
 				feature_flags: { user_takeover_tool: options.userTakeoverTool },
 				headless: options.headless,
 				...(options.executablePath && {

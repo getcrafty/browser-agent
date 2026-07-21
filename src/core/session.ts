@@ -157,6 +157,7 @@ export async function createSession(
 		lastProgressSignature: null,
 		sameActionSignatureStreak: 0,
 		noProgressStreak: 0,
+		incrementalDomContext: {},
 	};
 	deps.registry.set(session);
 

@@ -14,7 +14,16 @@ const PROVIDER_ENV: Record<Provider, string> = {
 	google: "GOOGLE_API_KEY",
 	together: "TOGETHER_API_KEY",
 	vllm: "VLLM_API_KEY",
+	openrouter: "OPENROUTER_API_KEY",
 };
+const OPENROUTER_REASONING_EFFORTS: readonly ReasoningEffort[] = [
+	"none",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+];
 type Capability = [
 	Provider,
 	string,
@@ -88,6 +97,11 @@ export function resolveOptions(options: BrowserAgentOptions): ResolvedOptions {
 		options.reasoningEffort ??
 		capability?.[4] ??
 		invalid("reasoningEffort is required for this model.");
+	if (
+		options.provider === "openrouter" &&
+		!OPENROUTER_REASONING_EFFORTS.includes(effort)
+	)
+		invalid(`Unsupported reasoningEffort '${effort}' for OpenRouter.`);
 	if (capability && !capability[3].includes(effort))
 		invalid(`Unsupported reasoningEffort '${effort}' for this model.`);
 	if (options.endpointUrl) {
@@ -104,6 +118,17 @@ export function resolveOptions(options: BrowserAgentOptions): ResolvedOptions {
 	}
 	if (options.provider === "vllm" && !options.endpointUrl)
 		invalid("endpointUrl is required for vllm.");
+	if (
+		options.openrouterProvider !== undefined &&
+		(typeof options.openrouterProvider !== "string" ||
+			!options.openrouterProvider.trim())
+	)
+		invalid("openrouterProvider must be a non-empty string.");
+	if (
+		options.openrouterProvider !== undefined &&
+		options.provider !== "openrouter"
+	)
+		invalid("openrouterProvider can only be used with OpenRouter.");
 	const apiKeyEnvironment = PROVIDER_ENV[options.provider];
 	const apiKey =
 		options.apiKey?.trim() || process.env[apiKeyEnvironment]?.trim();
@@ -116,6 +141,7 @@ export function resolveOptions(options: BrowserAgentOptions): ResolvedOptions {
 		...options,
 		model,
 		reasoningEffort: effort,
+		openrouterProvider: options.openrouterProvider?.trim(),
 		apiKey,
 		apiKeyEnvironment,
 		downloadDirectory: path.resolve(options.downloadDirectory),

@@ -1,11 +1,18 @@
 import type { BrowserAgentError } from "./errors.js";
-export type Provider = "openai" | "vllm" | "together" | "anthropic" | "google";
+export type Provider =
+	| "openai"
+	| "vllm"
+	| "together"
+	| "anthropic"
+	| "google"
+	| "openrouter";
 export type ReasoningEffort =
 	| "none"
 	| "minimal"
 	| "low"
 	| "medium"
 	| "high"
+	| "xhigh"
 	| "max"
 	| "enabled";
 export interface BrowserAgentOptions {
@@ -14,6 +21,7 @@ export interface BrowserAgentOptions {
 	reasoningEffort?: ReasoningEffort;
 	apiKey?: string;
 	endpointUrl?: string;
+	openrouterProvider?: string;
 	headless?: boolean;
 	executablePath?: string;
 	downloadDirectory: string;
