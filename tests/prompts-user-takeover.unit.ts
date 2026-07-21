@@ -190,7 +190,7 @@ describe("executor prompt user_takeover tool", () => {
 			assert.notInclude(prompt, "\ndone:");
 			assert.include(prompt, `previousStepStatus: "opened_tab"`);
 			assert.include(prompt, `previousStepStatus must be one of:`);
-			assert.include(
+			assert.notInclude(
 				prompt,
 				`PUT ANY THINKING OR REASONING IN THE "thinking" FIELD OF THE YAML.`,
 			);

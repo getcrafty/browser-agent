@@ -89,7 +89,12 @@ describe("website apification tools", () => {
 					currentUrl: "https://example.com/search",
 				});
 				assert.include(enabledPrompt, "website_tool:");
+				assert.include(
+					enabledPrompt,
+					`  - website_tool:\n      name: "tool_name"\n      inputs:\n        query: "value"`,
+				);
 				assert.include(enabledPrompt, "websiteToolResults");
+				assert.notInclude(enabledPrompt, "Tool-call shorthand mapping");
 				assert.include(
 					enabledPrompt,
 					"do not call extract_data for the same facts",

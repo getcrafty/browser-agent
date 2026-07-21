@@ -45,18 +45,18 @@ describe("executor memory prompt", () => {
 			`Use "memory_result" to clear extracted page data/result memory.`,
 		);
 		assert.include(prompt, "extract_data");
-		assert.include(prompt, "Launches data extraction asynchronously.");
+		assert.include(prompt, "extract_data runs asynchronously.");
 		assert.include(
 			prompt,
-			"runtime transparently waits for all pending extractions",
+			"transparently wait for pending extractions",
 		);
 		assert.include(
 			prompt,
-			"do not poll or add wait calls for extraction completion",
+			"Do not poll, retry, or add wait calls for extraction completion",
 		);
 		assert.include(
 			prompt,
-			'appears in "interactionErrors" on the next step',
+			'failures appear in "interactionErrors" on the next step',
 		);
 		assert.notInclude(prompt, "has synchronously stored");
 		assert.notInclude(
@@ -121,7 +121,7 @@ describe("executor memory prompt", () => {
 
 		assert.include(prompt, "paste_file:");
 		assert.include(prompt, "exact text contents");
-		assert.include(prompt, "helps discover paths but is not an allowlist");
+		assert.include(prompt, '"workspaceFiles" is informational, not an allowlist');
 		assert.include(prompt, 'Use this instead of "type"');
 		assert.include(PLAN_SYSTEM, "use paste_file");
 		assert.include(getExecutorSystemPlannerEmbed(), "paste_file");

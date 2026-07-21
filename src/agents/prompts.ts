@@ -177,10 +177,6 @@ function getBidSourceLabel(): string {
 	return "the current HTML context";
 }
 
-function getBidValidityRule(): string {
-	return "Must use a bid that is included in the current HTML context (never invent bid values).";
-}
-
 function getPreStepScreenshotInstructions(): string {
 	return configFeatureFlags.preStepScreenshotInLatestUserPrompt
 		? `- The latest user message includes a current-page screenshot captured immediately before this step (full page with captureBeyondViewport=true, with bid borders when possible). Use it for spatial/visibility context, but choose actions from ${getBidSourceLabel()} and "interactionErrors" when they conflict.`
@@ -342,17 +338,6 @@ function getWebsiteToolActionFormatBlock(
 `;
 }
 
-function getWebsiteToolShorthandInstruction(
-	options: ExecutorPromptOptions = {},
-): string {
-	if (!hasWebsiteTools(options)) return "";
-	return "  - website_tool: use a map with name and inputs\n";
-}
-
-function getExecutorFinalReasoningInstruction(): string {
-	return "ALWAYS THINK OR REASON BEFORE ANSWERING.";
-}
-
 function getExecutorSectionPayloadFormat(
 	options: ExecutorPromptOptions = {},
 ): string {
@@ -404,9 +389,6 @@ function getExecutorSectionResponseFormat(
 	const explicitResultExampleSource = websiteToolResultsEnabled
 		? "memoryContent or websiteToolResults"
 		: "memoryContent";
-	const resultSourceRule = websiteToolResultsEnabled
-		? "completed extract_data, memoryContent exposed by memory_read, or websiteToolResults"
-		: "completed extract_data or memoryContent exposed by memory_read";
 	const thinkingExampleBlock = getExecutorReasoningPreamble(options);
 	const actionContextExampleBlock = getExecutorActionContextPreamble(options);
 	const planUpdateFormatBlock = isPlanningEnabled()
@@ -414,9 +396,6 @@ function getExecutorSectionResponseFormat(
 		: "";
 	const regeneratePlanActionBlock = isPlanningEnabled()
 		? "  - regenerate_plan\n"
-		: "";
-	const regeneratePlanShorthandInstruction = isPlanningEnabled()
-		? "  - regenerate_plan: use the tool name only\n"
 		: "";
 	const planUpdateInstructions = isPlanningEnabled()
 		? PLAN_UPDATE_INSTRUCTIONS
@@ -476,7 +455,6 @@ ${configFeatureFlags.agentTakeoverTool ? '  - agent_takeover:\n      request: "C
 Rules:
 - All fields in the response are MANDATORY.
 - Do not provide done or result fields.
-- The only normal way to complete the task is to call return_results using evidence from ${resultSourceRule}. The runtime transparently waits for pending extractions before memory_read and return_results execute; do not poll or add wait calls for extraction completion.
 ${actionContextRules}- Final result objects returned by return_results follow EXACTLY THIS FORMAT:
   - link: URL to the source page for that data item (mandatory).
   - summary: concise summary of the relevant data from that link (mandatory)
@@ -486,29 +464,8 @@ ${actionContextRules}- Final result objects returned by return_results follow EX
 - During the run, use the temporary download path exactly as shown in "downloadedFiles" (typically "./downloads/..."), not a future synced workspace path such as "./Downloads/...".
 - The exact number of result objects depends on the request and the data you found.
 - Each key (${getResponseKeyOrder(options)}) must be present at most once and in the specified order.
-- Tool-call shorthand mapping:
-  - click/type: the bid follows the tool name (e.g. click: "3", type: "5")
-  - long_press: use a map with bid and optional durationMs from 100 to 15000
-  - scroll: use a map with bid + deltaX/deltaY (e.g. scroll: { bid: "8", deltaX: 0, deltaY: 400 })
-  - switch_tab: the tab index follows the tool name (e.g. switch_tab: 1)
-  - wait: the number of milliseconds follows the tool name (e.g. wait: 500)
-  - download_current_file: use the tool name only
-  - memory_write: the text to save follows the tool name
-  - memory_read: use the tool name only
-  - read_file: use a map with a safe workspace-relative path or completed downloadedFiles path
-  - return_results: use the tool name only to return completed extract_data memory unchanged, or provide a list of result objects when synthesizing from ${explicitResultExampleSource}
-  - memory_clear: use "memory", "memory_result", or "all"
-  - extract_data: the double-quoted scalar value is one bid/ncid or a comma-separated list; extracted items are always written to memory_result
-${configFeatureFlags.agentTakeoverTool ? "  - agent_takeover: use a map with request\n" : ""}  - navigate: the URL follows the tool name
-${getWebsiteToolShorthandInstruction(options)}
-${regeneratePlanShorthandInstruction}
-  - dropdown_select: use a map with bid (select element) and value (option value= from simplified DOM)
-  - upload_files: use a map with bid (upload control or file input) and paths (safe workspace-relative file paths)
-  - paste_file: use a map with bid (text input, textarea, or editable element) and path (a safe workspace-relative file path)
 - TEXT FIELDS (${textLikeScalarFields}) MUST ALWAYS BE SURROUNDED BY DOUBLE QUOTES to avoid YAML parsing issues.
-- For "type" tool calls, "enter" is an optional boolean (default false). Set it true only when pressing Enter is clearly intended.
-- For input type="date", pass a canonical YYYY-MM-DD value; the runtime assigns and verifies it atomically.
-${planUpdateInstructions}When the task is complete, use return_results instead of writing a result yourself.`;
+${planUpdateInstructions}`;
 }
 
 function getExecutorSectionActions(
@@ -531,25 +488,29 @@ function getExecutorSectionActions(
 	return `### Tool Types & Usage
 Choose tool calls based on what you need to accomplish next:
 
+Shared invariants:
+  - Every bid or ncid must come from the current HTML context; never invent one.
+  - File paths must use safe "./..." workspace/download paths. Absolute paths, host filesystem paths, hidden paths, and "../" traversal are forbidden.
+  - "workspaceFiles" is informational, not an allowlist. A safe path explicitly supplied by the task may be used even if absent from that list.
+  - extract_data runs asynchronously. memory_read and return_results transparently wait for pending extractions; failures appear in "interactionErrors" on the next step. Do not poll, retry, or add wait calls for extraction completion.
+
 click:
   - Use to click on the specified bid(s) element(s).
-  - ${getBidValidityRule()}
 
 long_press:
   - Use only for a visible control that explicitly requires pressing and holding.
   - Provide its bid and optional durationMs from 100 to 15000; the default is 3000.
   - Uses trusted pointer events. If the page remains unchanged, increase the duration within the bounded range.
-  - ${getBidValidityRule()}
 
 type:
   - Use to type into input or text area boxes.
-  - ${getBidValidityRule()}
   - Use optional "enter: true" only when you intentionally want to submit/confirm after typing.
   - For input type="date", always provide a canonical YYYY-MM-DD value. The runtime verifies the exact assigned value.
+  - If typing reveals an autocomplete/dropdown, select the intended suggestion before submitting instead of immediately using enter: true.
+  - Some inputs require focus to reveal the field where the actual text must be entered.
 
 scroll:
   - Use to scroll on an element or container; provide its bid and deltaX/deltaY values.
-  - ${getBidValidityRule()}
   - You can identify likely scroll containers by repeated sibling DOM structures (e.g. repeated row/card patterns) in the simplified DOM under the same parent, then target that parent's bid with "scroll".
   - For virtualized feeds (e.g. infinite grids/lists), if scrolling a child card does not move content, retry on its repeated-list parent/ancestor; if still unchanged, target a root feed/container bid and use larger deltas in repeated steps.
 
@@ -592,8 +553,6 @@ download_current_file:
 upload_files:
   - Use to attach one or more existing workspace files to an upload control without opening a native file picker.
   - Provide the target control's bid and a non-empty "paths" list.
-  - Every path must use the "./..." workspace-relative form. Never use absolute paths, host filesystem paths, hidden paths, or "../" traversal.
-  - "workspaceFiles" helps discover paths but is not an allowlist. A safe path explicitly supplied by the task may be used even when it is absent from that list.
   - If the page shows any visible control whose purpose is to choose, attach, import, or upload files and that would normally open an OS/native file chooser, call "upload_files" DIRECTLY on that visible control's bid instead of clicking it first.
   - Do NOT click a visible upload trigger and then defer "upload_files" to a later step. "upload_files" should be the action that targets the visible upload trigger or file input.
   - If both a visible upload trigger and hidden input type="file" elements exist, prefer calling "upload_files" on the visible trigger's bid unless a specific file input bid is clearly the intended target.
@@ -601,8 +560,6 @@ upload_files:
 paste_file:
   - Use to paste the exact text contents of an existing workspace file into a text input, textarea, or editable element.
   - Provide the target element's bid and a "path" string.
-  - The path must use the "./..." workspace-relative form. Never use absolute paths, host filesystem paths, hidden paths, or "../" traversal.
-  - "workspaceFiles" helps discover paths but is not an allowlist. A safe path explicitly supplied by the task may be used even when it is absent from that list.
   - Use this instead of "type" when the content to enter comes from a workspace/local/downloaded text file, especially when the content is long or must be exact.
   - Do not call memory_read only to retrieve exact bulk text for copying. Use memory_read for bounded semantic context and paste_file for exact file-to-field transfer.
 
@@ -614,26 +571,23 @@ memory_write:
 
 memory_read:
   - Use to retrieve the current scratchpad and extracted page data/result memory content before final synthesis.
-  - Call normally even when earlier extract_data work may still be running. Before memory_read executes, the runtime transparently waits for all pending extractions and persists successful output in launch order.
-  - Do not poll, retry, or add wait calls for extraction completion. A failed or timed-out extraction prevents this memory_read from executing and appears in "interactionErrors" on the next step.
   - Returns the current memory sections in "memoryContent" on the next step.
   - If the task asks you to read, inspect, extract, identify, summarize, or reason over information from a workspace/local file, or from a PDF/image/document/spreadsheet/dataset without a specific web URL, and "memoryContent" is absent or incomplete, call "memory_read" before navigating, uploading, or searching for that file's contents online.
   - If the task asks you to place exact workspace file text into a page field and supplies or exposes its relative path, use paste_file instead of reading or regenerating the full text.
   - After reading memoryContent, use the browser for the requested online lookup, verification, or follow-up work.
 
 read_file:
-  - Use to read a safe relative path in the shared workspace or a completed current-run path reported in downloadedFiles.
+  - Use to read a file in the shared workspace or a completed current-run path reported in downloadedFiles.
   - Supports bounded plain text, local Markdown conversion for CSV/DOCX/XLSX, PDF text-layer extraction, and local image OCR. Scanned PDFs without a text layer are unsupported.
   - The extracted content is stored as a provenance-bearing item in memory_result and appears in memoryContent on the next step.
   - On that next step, use bare return_results to return the stored file result unchanged, or synthesize an explicit result list from memoryContent.
-  - Do not batch read_file with extract_data or memory_clear. Never invent host paths, absolute paths, or "../" traversal.
+  - Do not batch read_file with extract_data or memory_clear.
 
 return_results:
   - Use once the final answer is available from any of these result sources: ${returnResultSources}.
-  - Call normally even when extract_data work may still be running. Before return_results executes, the runtime transparently waits for all pending extractions; do not poll or add wait calls for extraction completion.
-  - A failed or timed-out extraction prevents this return_results call from completing and appears in "interactionErrors" on the next step.
   - To return completed extract_data output unchanged, use the bare return_results tool name. A preceding memory_read is not required when the extracted result itself is already the desired answer.
   - To return an answer synthesized from ${explicitReturnResultSources}, provide the final list of {link, summary, downloaded_file_path?} objects under return_results.${websiteToolDirectReturnInstruction}
+  - Wait for requested results to load, verify they answer the task, and provide task-specific summaries rather than generic page descriptions.
   - This is the only normal tool that can complete the task.
 
 memory_clear:
@@ -645,11 +599,10 @@ memory_clear:
 
 extract_data:
   - Use when page data is meant to become part of the final result. Use over memory_write for that purpose.
-  - Launches data extraction asynchronously. The runtime captures the selected page content, starts background extraction, and continues with later actions and subsequent steps without waiting for it to finish.
-  - Do not poll for completion or add wait calls. Call memory_read or return_results normally when needed; the runtime applies the required completion barrier transparently.
+  - Captures selected page content and starts background extraction while later actions and steps continue.
   - Provide one scalar string containing one existing bid or ncid handle, or a comma-separated list of them (for example, extract_data: "!a,42,!b").
   - Select every relevant container in that one call; extraction parses all result items from the selected subtrees together.
-  - Root values must come from the current HTML. Never invent a bid or ncid, and never include an empty comma-separated segment.
+  - Never include an empty comma-separated segment.
   - Extracted items are always written to memory_result.
   - Do not provide a nested object or the removed "root", "items", "bid", "url_bid", "hierarchy", "write_to", "writeTo", "start", "end_exclusive", or "endExclusive" fields.
 
@@ -710,25 +663,14 @@ function getExecutorSectionMisc(options: ExecutorPromptOptions = {}): string {
 			: "";
 	return `### Misc Instructions
 ${planningInstructions}${reasoningTraceContextInstruction}- Use "interactionErrors" to diagnose blockers (e.g. invalid/missing form data, hidden/disabled targets, overlays/modals, timing issues) and choose corrective tool calls instead of repeating the same failing interaction.
-- IMPORTANT: If you notice repeated failures (e.g. the same step failing 2+ times in a row), slow down and emit only ONE tool call at a time so you can observe its effect before deciding the next move.
-- NEVER repeat the same failing tool call more than 2 times. If the same bid or UI surface fails twice without clear new evidence in the current payload, change strategy: use a different control, a different interaction type, or a different page/site.
+- After two failures on the same control or UI surface without clear new evidence, emit one action at a time and change strategy: use a different control, interaction type, page, or site.
 - If you see a VISIBLE cookie/consent banner, dismiss it if it blocks the next required action or hides needed information; otherwise continue. If the banner is hidden, then IGNORE IT.
 - If a captcha pops up, try to solve it, else try a different approach to reach the goal. If you can't, use a different website to accomplish the task.
 - When you are operating inside a modal or popup, you are encouraged to come up with as many tool calls as you see fit to accomplish the task within that modal, since modals often have multiple interactive elements that need to be used together. However, if you find yourself repeatedly interacting with the same element in a way that doesn't lead to progress, try a different approach.
 - ALWAYS use Today's date in your reasoning when relevant (e.g. for tasks involving current events or dates).
-- Some input boxes will require you to enter text and THEN select an option from a dropdown. In some cases, if you do not select the option from the dropdown, and submit the form, it may result in an error or in the input text dissapearing. In those cases, make sure to first type the text, then select the relevant option from the dropdown before submitting the form.
-- Pressing Enter right after typing is not always desirable. If an autocomplete/dropdown appears under the input, prefer selecting the intended suggestion first instead of immediately using enter: true.
-- Other input boxes will require focusing once to reveal another input box where the actual text needs to be entered.
 ${sequentialPlanInstruction}- If a tool call is meant to trigger a search, make it the last tool call of the step, and wait for the next step to navigate the page further.
-	- For tasks involving workspace/local file contents, or file/document contents without a specific web URL, prefer retrieving available memoryContent with "memory_read" before using browser search or upload workflows to discover what is inside the file.
-	- DO NOT OUTPUT ANYTHING BUT YAML IN YOUR RESPONSE. ${
-		shouldOmitExecutorThinkingField()
-			? "DO NOT SAY ANYTHING ELSE OUTSIDE OF THE YAML."
-			: 'PUT ANY THINKING OR REASONING IN THE "thinking" FIELD OF THE YAML. DO NOT SAY ANYTHING ELSE OUTSIDE OF THE YAML.'
-	} 
-- You are encouraged to take multiple tool calls at the same time but if things get confusing, SLOW DOWN. In case you get stuck completely on a website (e.g. past 10 tasks have not gotten you closer to completing your goal), you could try to navigate to a different website that you think might help you achieve the task.
-- ${getExecutorFinalReasoningInstruction()}
-- Make sure to wait for results to be loaded before sending the results to the user. Also, you have to make sure that you're actually sending a summary of what you see on the page adapted to the user's prompt, not just a generic message like "I see the search results page" or "I see a page with some products". For example, if the user asked you to find a specific product, you should check if you can see that product in the page and mention it in your reasoning and final answer.`;
+- For tasks involving workspace/local file contents, or file/document contents without a specific web URL, prefer retrieving available memoryContent with "memory_read" before using browser search or upload workflows to discover what is inside the file.
+- You are encouraged to take multiple tool calls at the same time but if things get confusing, SLOW DOWN. In case you get stuck completely on a website (e.g. past 10 tasks have not gotten you closer to completing your goal), you could try to navigate to a different website that you think might help you achieve the task.`;
 }
 
 const EXECUTOR_ROLE_SECTION = "You are a browser automation executor.";
@@ -758,6 +700,7 @@ function buildExecutorSystem(options: ExecutorPromptOptions = {}): string {
 	const blocks = options.blocks ?? EXECUTOR_PROMPT_BLOCKS_ALL;
 	const basePrompt = blocks
 		.map((block) => getExecutorPromptBlock(block, options))
+		.map((section) => section.replace(/\n{3,}/g, "\n\n").trim())
 		.filter((section) => section.length > 0)
 		.join("\n\n");
 	const activeGuidance = configFeatureFlags.websiteAPIficationTools

@@ -62,9 +62,9 @@ describe("executor reasoning prompt flags", () => {
 
 		assert.include(runAgentPrompt, "previousStepStatus");
 		assert.notInclude(plannerEmbedPrompt, "previousStepStatus");
-		assert.include(
+		assert.notInclude(
 			runAgentPrompt,
-			"ALWAYS THINK OR REASON BEFORE ANSWERING.",
+			"ALWAYS THINK OR REASON BEFORE ANSWERING",
 		);
 	});
 
@@ -72,9 +72,6 @@ describe("executor reasoning prompt flags", () => {
 		const prompt = getExecutorSystem();
 
 		assert.notInclude(prompt, "validBids");
-		assert.include(
-			prompt,
-			"Must use a bid that is included in the current HTML context",
-		);
+		assert.include(prompt, "Every bid or ncid must come from the current HTML context");
 	});
 });
