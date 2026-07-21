@@ -53,13 +53,6 @@ The URL must be a real, valid website URL. Only return the URL that is most rele
 
 const PLAN_PAYLOAD_DESCRIPTION = `- plan: array of step descriptions (can be automatically refreshed if you are stuck; always treat the latest payload as source of truth). Each step is prefixed with one status label: [DONE], [TODO], or [REGRESSED]`;
 
-const PLAN_UPDATE_FORMAT_BLOCK = `previousStepPlanUpdate:
-  - index: 3
-    status: "done"
-  - index: 1
-    status: "regressed"
-`;
-
 const PLAN_UPDATE_INSTRUCTIONS = `The "previousStepPlanUpdate" field MUST always be present and can be an empty array.
 - Use it to report which plan index(es) changed status after evaluating the previous step tool call(s) against the current HTML.
 - Allowed statuses are only "done" and "regressed".
@@ -139,10 +132,7 @@ export function shouldIncludeExecutorReasoningHistory(
 export function shouldEmitExecutorActionContextFields(
 	options: ExecutorPromptOptions = {},
 ): boolean {
-	return (
-		featureFlags.executorActionContextFields &&
-		!shouldUseExecutorReasoningTraceContext(options)
-	);
+	return !shouldUseExecutorReasoningTraceContext(options);
 }
 
 function getResponseKeyOrder(options: ExecutorPromptOptions = {}): string {
@@ -175,40 +165,17 @@ function getPreStepScreenshotInstructions(): string {
 		: "";
 }
 
-const DOM_PRUNE_ACTION_FORMAT_BLOCK = featureFlags.domPruneActionTools
-	? `  - prune:
-      bids:
-        - "3f"
-        - "5"
-  - unprune
-`
-	: "";
-
-function getUserTakeoverActionFormatBlock(): string {
-	if (configFeatureFlags.userTakeoverTool) {
-		return `  - user_takeover:
-      category: "authentication"
-      request: "Sensitive step requiring manual user interaction (e.g. sign-in, payment, 2FA)."
-`;
-	}
-	if (configFeatureFlags.authTakeover) {
-		return `  - user_takeover:
-      category: "authentication"
-      request: "Authentication is required to continue."
-`;
-	}
-	return "";
-}
-
 function getUserTakeoverActionInstructions(): string {
 	if (configFeatureFlags.userTakeoverTool) {
-		return `- Use "user_takeover" ONLY for sensitive user-only interactions (e.g. entering passwords, payment details, OTP/2FA, or account verification steps).
+		return `- Required fields include category: "authentication" and request: "Sensitive step requiring manual user interaction (e.g. sign-in, payment, 2FA)."
+- Use "user_takeover" ONLY for sensitive user-only interactions (e.g. entering passwords, payment details, OTP/2FA, or account verification steps).
 - Always include "category". Use "authentication" for login credentials, "otp" for one-time codes/authenticator steps, "verification" for CAPTCHA/identity checks, "payment" for billing/payment entry, and "other" only when none of those fit.
 - "user_takeover" requires a non-empty "request" string.
 - When you use "user_takeover", do not include additional tool calls in the same step. Wait for the user to finish manual interaction and signal resume.`;
 	}
 	if (configFeatureFlags.authTakeover) {
-		return `- Use "user_takeover" with category "authentication" only when the page requires sign-in credentials and authentication handling is needed to continue.
+		return `- Required fields include category: "authentication" and request: "Authentication is required to continue."
+- Use "user_takeover" with category "authentication" only when the page requires sign-in credentials and authentication handling is needed to continue.
 - "user_takeover" requires a non-empty "request" string.
 - In this environment, the runtime may attempt supported authentication automatically after this tool call instead of asking the user directly.
 - Do not use "user_takeover" for OTP, CAPTCHA, payment, or other manual verification flows when manual takeover is disabled.`;
@@ -258,13 +225,13 @@ function getExecutorActionContextPreamble(
 	options: ExecutorPromptOptions = {},
 ): string {
 	if (shouldEmitExecutorActionContextFields(options)) {
-		return `previousStepStatus: "opened_tab"
+		return `previousStepStatus: "progressed"
 previousStepOutcome: |-
-  Opened Gmail sign-in tab.
+  Opened the search form.
 currentStateObservation: |-
-  Current tab is still the Workspace landing page.
+  The search field is visible.
 nextActionRationale: |-
-  Switch to the Gmail tab to continue login.
+  Enter the requested query.
 
 `;
 	}
@@ -305,17 +272,6 @@ function shouldExposeWebsiteToolResultGuidance(
 		configFeatureFlags.websiteAPIficationTools &&
 		(hasWebsiteTools(options) || options.websiteToolResultsAvailable === true)
 	);
-}
-
-function getWebsiteToolActionFormatBlock(
-	options: ExecutorPromptOptions = {},
-): string {
-	if (!hasWebsiteTools(options)) return "";
-	return `  - website_tool:
-      name: "tool_name"
-      inputs:
-        query: "value"
-`;
 }
 
 function getWebsiteToolShorthandInstruction(
@@ -384,12 +340,6 @@ function getExecutorSectionResponseFormat(
 		? "completed extract_data, memoryContent exposed by memory_read, or websiteToolResults"
 		: "completed extract_data or memoryContent exposed by memory_read";
 	const actionContextExampleBlock = getExecutorActionContextPreamble(options);
-	const planUpdateFormatBlock = isPlanningEnabled()
-		? PLAN_UPDATE_FORMAT_BLOCK
-		: "";
-	const regeneratePlanActionBlock = isPlanningEnabled()
-		? "  - regenerate_plan\n"
-		: "";
 	const regeneratePlanShorthandInstruction = isPlanningEnabled()
 		? "  - regenerate_plan: use the tool name only\n"
 		: "";
@@ -399,47 +349,15 @@ function getExecutorSectionResponseFormat(
 	const textLikeScalarFields = `link, summary, downloaded_file_path, bid, path, root, type, text, url, script, request, value`;
 	const actionContextRules = getExecutorActionContextRules(options);
 	return `### Expected Output
-Respond with raw YAML ONLY, and include a single separator marker <yaml> right before the YAML. Everything after <yaml> must be parseable YAML. DO NOT SAY ANYTHING ELSE OUTSIDE OF THE YAML.:
-${planUpdateFormatBlock}${actionContextExampleBlock}tools:
-  - click: "3"
-  - long_press:
-      bid: "4"
-      durationMs: 3000
+Respond with raw YAML enclosed by <yaml> and </yaml> tags. Everything between the tags must be parseable YAML. Do not include any text outside the tags.
+
+Example response:
+<yaml>
+${actionContextExampleBlock}tools:
   - type: "5"
-    text: "value"
-    enter: false
-  - scroll:
-      bid: "8"
-      deltaX: 0
-      deltaY: 400
-  - evaluate:
-      script: "document.querySelector('[data-bid=\\"5\\"]')?.dispatchEvent(new Event('input', { bubbles: true }))"
-  - dropdown_select:
-      bid: "n"
-      value: "4"
-  - navigate: "https://..."
-  - switch_tab: 1
-  - wait: 500
-  - download_current_file
-  - upload_files:
-      bid: "12"
-      paths:
-        - "./statement.pdf"
-        - "./downloads/latest.csv"
-  - paste_file:
-      bid: "12"
-      path: "./extracted_text.txt"
-  - memory_write: "text to save"
-  - memory_read
-  - read_file:
-      path: "./downloads/source.pdf"
-  - return_results
-  - return_results:
-      - link: "https://example.com/result"
-        summary: "Task-relevant result grounded in ${explicitResultExampleSource}."
-  - memory_clear: "memory_result"
-  - extract_data: "!a"
-${configFeatureFlags.agentTakeoverTool ? '  - agent_takeover:\n      request: "Create ./downloads/report/financial_report.pdf from ./downloads/report/source.txt, then verify the PDF exists."' + "\n" : ""}${getWebsiteToolActionFormatBlock(options)}${DOM_PRUNE_ACTION_FORMAT_BLOCK}${getUserTakeoverActionFormatBlock()}${regeneratePlanActionBlock}
+    text: "browser automation"
+    enter: true
+</yaml>
 
 Rules:
 - All fields in the response are MANDATORY.

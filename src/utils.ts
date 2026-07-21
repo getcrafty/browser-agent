@@ -1034,7 +1034,7 @@ export function loadConfig(configPath: string): Config {
 	] as const) {
 		if (featureFlagsSource[legacyKey] !== undefined) {
 			failConfig(
-				`${configPathLabel} is no longer configurable via YAML; update src/featureFlags.ts instead.`,
+				`${configPathLabel} has been removed; executor action-context fields are always enabled.`,
 			);
 		}
 	}

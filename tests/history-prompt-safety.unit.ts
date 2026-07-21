@@ -86,9 +86,7 @@ describe("history prompt safety", () => {
 	});
 
 	it("canonicalizes history assistant messages for strings, arbitrary objects, and step-like records", () => {
-		const originalActionContext = featureFlags.executorActionContextFields;
 		const originalEnablePlanning = featureFlags.enablePlanning;
-		featureFlags.executorActionContextFields = false;
 		featureFlags.enablePlanning = true;
 		try {
 			const messages = buildHistoryMessagesFromFullStepHistory([
@@ -202,14 +200,14 @@ describe("history prompt safety", () => {
 			assert.notInclude(String(messages[17].content), "done:");
 			assert.notInclude(String(messages[17].content), "result:");
 		} finally {
-			featureFlags.executorActionContextFields = originalActionContext;
 			featureFlags.enablePlanning = originalEnablePlanning;
 		}
 	});
 
-	it("includes action-context fields in canonicalized assistant messages when enabled", () => {
-		const originalActionContext = featureFlags.executorActionContextFields;
-		featureFlags.executorActionContextFields = true;
+	it("includes action-context fields in canonicalized assistant messages by default", () => {
+		const originalReasoningTraceContext =
+			featureFlags.executorReasoningTraceContext;
+		featureFlags.executorReasoningTraceContext = false;
 		try {
 			const messages = buildHistoryMessagesFromFullStepHistory([
 				{
@@ -249,13 +247,15 @@ describe("history prompt safety", () => {
 			assert.notInclude(String(messages[1].content), "done:");
 			assert.notInclude(String(messages[1].content), "result:");
 		} finally {
-			featureFlags.executorActionContextFields = originalActionContext;
+			featureFlags.executorReasoningTraceContext =
+				originalReasoningTraceContext;
 		}
 	});
 
 	it("omits legacy thinking fields from canonicalized assistant messages", () => {
-		const originalActionContext = featureFlags.executorActionContextFields;
-		featureFlags.executorActionContextFields = true;
+		const originalReasoningTraceContext =
+			featureFlags.executorReasoningTraceContext;
+		featureFlags.executorReasoningTraceContext = false;
 		try {
 			const messages = buildHistoryMessagesFromFullStepHistory([
 				{
@@ -297,16 +297,15 @@ describe("history prompt safety", () => {
 			assert.notInclude(String(messages[1].content), "done:");
 			assert.notInclude(String(messages[1].content), "result:");
 		} finally {
-			featureFlags.executorActionContextFields = originalActionContext;
+			featureFlags.executorReasoningTraceContext =
+				originalReasoningTraceContext;
 		}
 	});
 
 	it("injects reasoning traces for eligible providers or incremental context", () => {
-		const originalActionContext = featureFlags.executorActionContextFields;
 		const originalReasoningTraceContext =
 			featureFlags.executorReasoningTraceContext;
 		const originalIncrementalDomContext = featureFlags.incrementalDomContext;
-		featureFlags.executorActionContextFields = true;
 		featureFlags.executorReasoningTraceContext = true;
 		featureFlags.incrementalDomContext = false;
 		const stepsHistory = [
@@ -370,7 +369,6 @@ describe("history prompt safety", () => {
 				"previousStepStatus: progressed",
 			);
 		} finally {
-			featureFlags.executorActionContextFields = originalActionContext;
 			featureFlags.executorReasoningTraceContext =
 				originalReasoningTraceContext;
 			featureFlags.incrementalDomContext = originalIncrementalDomContext;

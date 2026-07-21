@@ -811,7 +811,7 @@ tasks:
 
 		assert.include(
 			errorOutput,
-			"feature_flags.executor_action_context_fields is no longer configurable via YAML; update src/featureFlags.ts instead.",
+			"feature_flags.executor_action_context_fields has been removed; executor action-context fields are always enabled.",
 		);
 	});
 
@@ -1607,8 +1607,6 @@ tasks:
 		const originalDismissCookieBanner = configFeatureFlags.dismissCookieBanner;
 		const originalPreExecutionDomPruning =
 			configFeatureFlags.preExecutionDomPruning;
-		const originalExecutorActionContextFields =
-			featureFlags.executorActionContextFields;
 		try {
 			const deps = createDefaultCoreDeps({
 				featureFlags: {
@@ -1636,10 +1634,6 @@ tasks:
 				optimizeTextInput: false,
 			});
 			assert.deepEqual(configFeatureFlags, deps.featureFlags);
-			assert.strictEqual(
-				featureFlags.executorActionContextFields,
-				originalExecutorActionContextFields,
-			);
 		} finally {
 			configFeatureFlags.preStepScreenshotInLatestUserPrompt =
 				originalPreStepScreenshot;
@@ -1649,8 +1643,6 @@ tasks:
 			configFeatureFlags.dismissCookieBanner = originalDismissCookieBanner;
 			configFeatureFlags.preExecutionDomPruning =
 				originalPreExecutionDomPruning;
-			featureFlags.executorActionContextFields =
-				originalExecutorActionContextFields;
 		}
 	});
 });

@@ -5,8 +5,6 @@ export const featureFlags = {
 	hideOffscreenDomContent: false,
 	// Controls exposing prune/unprune live-DOM actions in executor prompts and execution.
 	domPruneActionTools: false,
-	// Controls replacing omitted executor thinking with structured previous-step action context fields.
-	executorActionContextFields: true,
 	// Replaces executor action-context fields with prior reasoning traces for non-OpenAI executor models.
 	executorReasoningTraceContext: false,
 	// Sends full/diff DOM context and retains prior assistant reasoning for cacheable executor trajectories.

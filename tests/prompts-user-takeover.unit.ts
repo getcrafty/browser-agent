@@ -1,5 +1,6 @@
 import { assert } from "chai";
 import { describe, it } from "mocha";
+import yaml from "js-yaml";
 import { getExecutorSystem } from "../src/agents/prompts.js";
 import { configFeatureFlags } from "../src/config-feature-flags.js";
 import { featureFlags } from "../src/featureFlags.js";
@@ -100,9 +101,7 @@ describe("executor prompt user_takeover tool", () => {
 	});
 
 	it("always omits thinking field requirements", () => {
-		const originalActionContext = featureFlags.executorActionContextFields;
 		const originalEnablePlanning = featureFlags.enablePlanning;
-		featureFlags.executorActionContextFields = false;
 		featureFlags.enablePlanning = true;
 		try {
 			const prompt = getExecutorSystem();
@@ -112,25 +111,45 @@ describe("executor prompt user_takeover tool", () => {
 			);
 			assert.include(
 				prompt,
-				`Each key (previousStepPlanUpdate, tools) must be present at most once and in the specified order.`,
+				`Each key (previousStepPlanUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
 			);
 			assert.notInclude(prompt, "\ndone:");
-			assert.notInclude(prompt, `previousStepStatus: "opened_tab"`);
-			assert.notInclude(prompt, `previousStepStatus must be one of:`);
+			assert.include(prompt, `previousStepStatus must be one of:`);
 			assert.notInclude(
 				prompt,
 				`PUT ANY THINKING OR REASONING IN THE "thinking" FIELD OF THE YAML.`,
 			);
 		} finally {
-			featureFlags.executorActionContextFields = originalActionContext;
 			featureFlags.enablePlanning = originalEnablePlanning;
 		}
 	});
 
-	it("includes action-context schema when enabled alongside omitted thinking", () => {
-		const originalActionContext = featureFlags.executorActionContextFields;
+	it("shows one concrete YAML response example bounded by tags", () => {
+		const prompt = getExecutorSystem();
+		const exampleMatch = prompt.match(
+			/Example response:\n<yaml>\n([\s\S]*?)\n<\/yaml>/,
+		);
+
+		assert.isNotNull(exampleMatch);
+		const example = yaml.load(exampleMatch?.[1] ?? "") as Record<
+			string,
+			unknown
+		>;
+		assert.deepInclude(example, {
+			tools: [
+				{
+					type: "5",
+					text: "browser automation",
+					enter: true,
+				},
+			],
+		});
+		assert.notProperty(example, "previousStepPlanUpdate");
+		assert.strictEqual(prompt.split("Example response:").length - 1, 1);
+	});
+
+	it("includes action-context schema alongside omitted thinking", () => {
 		const originalEnablePlanning = featureFlags.enablePlanning;
-		featureFlags.executorActionContextFields = true;
 		featureFlags.enablePlanning = true;
 		try {
 			const prompt = getExecutorSystem();
@@ -139,24 +158,23 @@ describe("executor prompt user_takeover tool", () => {
 				`Each key (previousStepPlanUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
 			);
 			assert.notInclude(prompt, "\ndone:");
-			assert.include(prompt, `previousStepStatus: "opened_tab"`);
+			assert.include(prompt, `previousStepStatus: "progressed"`);
 			assert.include(
 				prompt,
 				`previousStepOutcome: |-
-  Opened Gmail sign-in tab.`,
+  Opened the search form.`,
 			);
 			assert.include(
 				prompt,
 				`currentStateObservation: |-
-  Current tab is still the Workspace landing page.`,
+  The search field is visible.`,
 			);
 			assert.include(
 				prompt,
 				`nextActionRationale: |-
-  Switch to the Gmail tab to continue login.`,
+  Enter the requested query.`,
 			);
 		} finally {
-			featureFlags.executorActionContextFields = originalActionContext;
 			featureFlags.enablePlanning = originalEnablePlanning;
 		}
 	});
