@@ -1120,6 +1120,15 @@ export function loadConfig(configPath: string): Config {
 				fullPath,
 				"feature_flags.optimize_text_input",
 			) ?? false,
+		removeHrefsFromInputContext:
+			parseBooleanConfigValue(
+				pickFirstDefined(featureFlagsSource, [
+					"remove_hrefs_from_input_context",
+					"removeHrefsFromInputContext",
+				]),
+				fullPath,
+				"feature_flags.remove_hrefs_from_input_context",
+			) ?? false,
 	};
 	const authCredentials = parseEncryptedAuthCredentialsConfig(
 		pickFirstDefined(raw, ["auth_credentials", "authCredentials"]),

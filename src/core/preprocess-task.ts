@@ -233,7 +233,7 @@ export async function preprocessTask(
 				});
 
 	const domPruning = createEmptyDomPruningResult();
-	if (planningEnabled && deps.featureFlags.preExecutionDomPruning) {
+	if (deps.featureFlags.preExecutionDomPruning) {
 		const prunerDom = await deps.getSimplifiedDOM(session.browser, {
 			includeNonClickableIds: true,
 		});

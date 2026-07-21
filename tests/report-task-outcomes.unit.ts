@@ -193,7 +193,12 @@ describe("report-task-outcomes token estimates", () => {
 				{ messages: [{ role: "user", content: "No assistant yet" }] },
 			],
 			tokenUsage: [
-				{ step: 1, input_tokens: 400_000, output_tokens: 500_000 },
+				{
+					step: 1,
+					input_tokens: 400_000,
+					cached_input_tokens: 120_000,
+					output_tokens: 500_000,
+				},
 				{ step: 2, total_tokens: 600_000, output_tokens: 700_000 },
 			],
 			trajectoryDurationMs: 1_250,
@@ -307,6 +312,10 @@ describe("report-task-outcomes token estimates", () => {
 			formatted(sum(outputCounts)),
 		);
 		assert.strictEqual(
+			report.totalCachedInputTokensAcrossAllTaskSteps,
+			"120,000",
+		);
+		assert.strictEqual(
 			report.totalTokensAcrossAllTaskSteps,
 			formatted(sum(totalCounts)),
 		);
@@ -317,6 +326,10 @@ describe("report-task-outcomes token estimates", () => {
 		assert.deepInclude(
 			report.outputTokensPerStep as Stats,
 			summarize(outputCounts),
+		);
+		assert.deepInclude(
+			report.cachedInputTokensPerStep as Stats,
+			summarize([120_000, 0]),
 		);
 		assert.deepInclude(
 			report.tokensPerStep as Stats,

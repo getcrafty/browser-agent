@@ -30,6 +30,7 @@ interface ParsedFileMetrics {
 	stepCountsPerAttempt: number[];
 	tokenCountsPerStep: number[];
 	inputTokenCountsPerStep: number[];
+	cachedInputTokenCountsPerStep: number[];
 	outputTokenCountsPerStep: number[];
 	trajectoryDurationMsPerAttempt: number[];
 	stepDurationMs: number[];
@@ -589,6 +590,9 @@ function mergeParsedMetrics(
 	current.stepCountsPerAttempt.push(...next.stepCountsPerAttempt);
 	current.tokenCountsPerStep.push(...next.tokenCountsPerStep);
 	current.inputTokenCountsPerStep.push(...next.inputTokenCountsPerStep);
+	current.cachedInputTokenCountsPerStep.push(
+		...next.cachedInputTokenCountsPerStep,
+	);
 	current.outputTokenCountsPerStep.push(...next.outputTokenCountsPerStep);
 	current.trajectoryDurationMsPerAttempt.push(
 		...next.trajectoryDurationMsPerAttempt,
@@ -610,6 +614,7 @@ function createEmptyMetrics(): ParsedFileMetrics {
 		stepCountsPerAttempt: [],
 		tokenCountsPerStep: [],
 		inputTokenCountsPerStep: [],
+		cachedInputTokenCountsPerStep: [],
 		outputTokenCountsPerStep: [],
 		trajectoryDurationMsPerAttempt: [],
 		stepDurationMs: [],
@@ -908,6 +913,7 @@ async function parseFile(filePath: string): Promise<ParsedFileMetrics> {
 	const stepCountsPerAttempt: number[] = [];
 	const tokenCountsPerStep: number[] = [];
 	const inputTokenCountsPerStep: number[] = [];
+	const cachedInputTokenCountsPerStep: number[] = [];
 	const outputTokenCountsPerStep: number[] = [];
 	const trajectoryDurationMsPerAttempt: number[] = [];
 	const stepDurationMs: number[] = [];
@@ -974,6 +980,23 @@ async function parseFile(filePath: string): Promise<ParsedFileMetrics> {
 			outputTokenCountsPerStep.push(tokenCount.outputTokens);
 			tokenCountsPerStep.push(tokenCount.totalTokens);
 		}
+		const tokenUsage = Array.isArray(entry.tokenUsage)
+			? entry.tokenUsage
+			: [];
+		for (const rawUsage of tokenUsage) {
+			if (!rawUsage || typeof rawUsage !== "object") continue;
+			const cachedInputTokens = (rawUsage as Record<string, unknown>)
+				.cached_input_tokens;
+			if (cachedInputTokens === undefined) {
+				cachedInputTokenCountsPerStep.push(0);
+			} else if (
+				typeof cachedInputTokens === "number" &&
+				Number.isFinite(cachedInputTokens) &&
+				cachedInputTokens >= 0
+			) {
+				cachedInputTokenCountsPerStep.push(cachedInputTokens);
+			}
+		}
 
 		const runtimeMetrics = extractRuntimeMetrics(entry);
 		if (runtimeMetrics) {
@@ -996,6 +1019,7 @@ async function parseFile(filePath: string): Promise<ParsedFileMetrics> {
 		stepCountsPerAttempt,
 		tokenCountsPerStep,
 		inputTokenCountsPerStep,
+		cachedInputTokenCountsPerStep,
 		outputTokenCountsPerStep,
 		trajectoryDurationMsPerAttempt,
 		stepDurationMs,
@@ -1092,6 +1116,11 @@ async function main(): Promise<void> {
 			(sum, outputTokenCount) => sum + outputTokenCount,
 			0,
 		);
+	const totalCachedInputTokensAcrossAllTaskSteps =
+		aggregatedMetrics.cachedInputTokenCountsPerStep.reduce(
+			(sum, cachedInputTokenCount) => sum + cachedInputTokenCount,
+			0,
+		);
 	const totalTrajectoryDurationMs =
 		aggregatedMetrics.trajectoryDurationsMs.reduce(
 			(sum, durationMs) => sum + durationMs,
@@ -1144,6 +1173,9 @@ async function main(): Promise<void> {
 		totalInputTokensAcrossAllTaskSteps: formatIntegerWithCommas(
 			totalInputTokensAcrossAllTaskSteps,
 		),
+		totalCachedInputTokensAcrossAllTaskSteps: formatIntegerWithCommas(
+			totalCachedInputTokensAcrossAllTaskSteps,
+		),
 		totalOutputTokensAcrossAllTaskSteps: formatIntegerWithCommas(
 			totalOutputTokensAcrossAllTaskSteps,
 		),
@@ -1186,6 +1218,11 @@ async function main(): Promise<void> {
 		),
 		inputTokensPerStep: normalizeStatsForOutput(
 			summarizeWithPercentiles(aggregatedMetrics.inputTokenCountsPerStep),
+		),
+		cachedInputTokensPerStep: normalizeStatsForOutput(
+			summarizeWithPercentiles(
+				aggregatedMetrics.cachedInputTokenCountsPerStep,
+			),
 		),
 		outputTokensPerStep: normalizeStatsForOutput(
 			summarizeWithPercentiles(

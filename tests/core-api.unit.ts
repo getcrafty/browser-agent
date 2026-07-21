@@ -1538,10 +1538,11 @@ describe("core-api", () => {
 		assert.isUndefined(deps.registry.get(9222));
 	});
 
-	it("runAgent skips initial planning and plan context when planning is disabled", async () => {
+	it("runAgent skips planning context but still prunes when planning is disabled", async () => {
 		featureFlags.enablePlanning = false;
 		let createPlanCalls = 0;
 		let pruneCalls = 0;
+		const observedPruningPlans: string[][] = [];
 		const observedPayloads: Record<string, unknown>[] = [];
 		const observedMessages: unknown[] = [];
 		const deps = createMockCoreDeps({
@@ -1549,10 +1550,11 @@ describe("core-api", () => {
 				createPlanCalls += 1;
 				return { steps: ["Should not run"] };
 			},
-			choosePreExecutionDomNonClickableIdsToExclude: async () => {
+			choosePreExecutionDomNonClickableIdsToExclude: async ({ plan }) => {
 				pruneCalls += 1;
+				observedPruningPlans.push(plan);
 				return {
-					thinking: "Should not run",
+					thinking: "Prune using the task without a plan",
 					excludedNonClickableIds: [],
 					tokenUsage: {
 						input_tokens: 0,
@@ -1601,8 +1603,13 @@ describe("core-api", () => {
 		});
 
 		assert.strictEqual(createPlanCalls, 0);
-		assert.strictEqual(pruneCalls, 0);
+		assert.strictEqual(pruneCalls, 1);
+		assert.deepEqual(observedPruningPlans, [[]]);
 		assert.deepEqual(result.preprocess.plan, []);
+		assert.strictEqual(
+			result.preprocess.dom_pruning.thinking,
+			"Prune using the task without a plan",
+		);
 		assert.lengthOf(observedPayloads, 1);
 		assert.notProperty(observedPayloads[0], "plan");
 		assert.notInclude(

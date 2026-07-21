@@ -25,6 +25,7 @@ import {
 	findBodyNodeIndex,
 } from "./simplify-dom-utils/dom-snapshot-helpers.js";
 import { pruneLargeHiddenHierarchies } from "./simplify-dom-utils/prune-large-hidden-hierarchies.js";
+import { discardEmptyBidHierarchies } from "./simplify-dom-utils/discard-empty-bid-hierarchies.js";
 import {
 	stampDataBidsOnLiveDom,
 	stampDataNonClickableIdsOnLiveDom,
@@ -1447,9 +1448,13 @@ export async function getSimplifiedDOM(
 
 			// IMPORTANT: keep this final hoist pass here, right before serialization/stamping.
 			// Earlier placement lets subsequent cleanup heuristics reintroduce redundant wrappers.
-			return typeof textPrunedTree !== "string"
-				? runFinalTransparentWrapperHoist(textPrunedTree)
-				: textPrunedTree;
+			const finalTree =
+				typeof textPrunedTree !== "string"
+					? runFinalTransparentWrapperHoist(textPrunedTree)
+					: textPrunedTree;
+			return featureFlags.discardEmptyBids && typeof finalTree !== "string"
+				? discardEmptyBidHierarchies(finalTree)
+				: finalTree;
 		},
 	);
 
