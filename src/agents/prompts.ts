@@ -364,6 +364,7 @@ function getExecutorSectionPayloadFormat(
 	return `### Payload Format
 For the last step you executed, you receive a YAML payload with these fields:
 - task: the user's overall task
+- currentDateTime: the current runtime-local date and time, including the IANA time zone and expected display format
 ${isPlanningEnabled() ? PLAN_PAYLOAD_DESCRIPTION : ""}
 - currentURL: the URL of the current page
 - currentTab: zero-based index of the currently active tab in "openTabs"
@@ -791,18 +792,8 @@ export function getExecutorSystemPlannerEmbed(
 	});
 }
 
-/** Get the executor system prompt with today's date */
 export function getExecutorSystem(options: ExecutorPromptOptions = {}): string {
-	const today = new Date().toLocaleDateString("en-GB", {
-		day: "2-digit",
-		month: "2-digit",
-		year: "numeric",
-		hour: "2-digit",
-		minute: "2-digit",
-		timeZoneName: "short",
-	});
-	const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	return `${buildExecutorSystem({ ...options, forRunAgentStep: true })}\n\nToday's date/time is ${today} (${timeZone}; dd/mm/yyyy hh:mm time zone).`;
+	return buildExecutorSystem({ ...options, forRunAgentStep: true });
 }
 
 /** System prompt for creating a plan */

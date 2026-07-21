@@ -366,6 +366,16 @@ describe("step-execution-messages", () => {
 
 		assert.strictEqual(messages.length, 2);
 		assert.strictEqual(typeof messages[1].content, "string");
+		const userPayload = yaml.load(String(messages[1].content)) as Record<
+			string,
+			unknown
+		>;
+		const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		assert.match(
+			String(userPayload.currentDateTime),
+			/^\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2} .+ \(.+; dd\/mm\/yyyy hh:mm time zone\)$/,
+		);
+		assert.include(String(userPayload.currentDateTime), timeZone);
 	});
 
 	it("includes screenshot signals as image parts in step messages", () => {

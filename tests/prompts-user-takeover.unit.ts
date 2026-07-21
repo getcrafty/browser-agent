@@ -12,13 +12,11 @@ import {
 } from "../src/auth/prompt.js";
 
 describe("executor prompt user_takeover tool", () => {
-	it("includes today's date with the runtime time zone", () => {
+	it("keeps the system prompt free of the runtime date and time", () => {
 		const prompt = getExecutorSystem();
-		const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-		assert.include(prompt, "Today's date/time is");
-		assert.include(prompt, timeZone);
-		assert.include(prompt, "dd/mm/yyyy hh:mm time zone");
+		assert.notInclude(prompt, "Today's date/time is");
+		assert.notInclude(prompt, "dd/mm/yyyy hh:mm time zone");
 	});
 
 	it("documents user_takeover schema, categories, and sensitive-use guidance", () => {

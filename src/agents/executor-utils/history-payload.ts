@@ -14,6 +14,7 @@ const PROMPT_ONLY_PAYLOAD_FIELDS = [
 	"currentPageScreenshotIncludedAsImagePart",
 	"previousAction",
 	"task",
+	"currentDateTime",
 	"memoryAvailable",
 	"memoryContent",
 	"websiteToolResults",

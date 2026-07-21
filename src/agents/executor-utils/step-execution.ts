@@ -244,8 +244,18 @@ export function buildStepPayload(params: {
 	currentPageScreenshotIncludedAsImagePart?: boolean;
 	validatorFeedback?: ValidatorFeedback;
 }): { payload: Record<string, unknown>; pendingMemoryRead: boolean } {
+	const currentDateTime = new Date().toLocaleDateString("en-GB", {
+		day: "2-digit",
+		month: "2-digit",
+		year: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+		timeZoneName: "short",
+	});
+	const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 	const payload: Record<string, unknown> = {
 		task: params.task,
+		currentDateTime: `${currentDateTime} (${timeZone}; dd/mm/yyyy hh:mm time zone)`,
 		currentURL: params.url,
 		interactionErrors: params.previousInteractionErrors,
 		currentTab:
