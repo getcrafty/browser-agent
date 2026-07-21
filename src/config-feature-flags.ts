@@ -11,8 +11,6 @@ export interface ConfigFeatureFlags {
 	dismissCookieBanner: boolean;
 	/** Prune task-irrelevant DOM content before planning begins. */
 	preExecutionDomPruning: boolean;
-	/** Exclude the executor's free-form thinking field from its output and history. */
-	omitExecutorThinkingField: boolean;
 	/** Expose site-specific website tools and their results to the executor. */
 	websiteAPIficationTools: boolean;
 	/** Skip the post-step settling delay when every action is agent-local. */
@@ -28,7 +26,6 @@ export const configFeatureFlags: ConfigFeatureFlags = {
 	agentTakeoverTool: false,
 	dismissCookieBanner: true,
 	preExecutionDomPruning: true,
-	omitExecutorThinkingField: true,
 	websiteAPIficationTools: false,
 	optimizeExecutorStepDelays: false,
 	optimizeTextInput: false,
@@ -61,16 +58,12 @@ export function mergeConfigFeatureFlags(
 		...(overrides.preExecutionDomPruning !== undefined
 			? { preExecutionDomPruning: overrides.preExecutionDomPruning }
 			: {}),
-		...(overrides.omitExecutorThinkingField !== undefined
-			? { omitExecutorThinkingField: overrides.omitExecutorThinkingField }
-			: {}),
 		...(overrides.websiteAPIficationTools !== undefined
 			? { websiteAPIficationTools: overrides.websiteAPIficationTools }
 			: {}),
 		...(overrides.optimizeExecutorStepDelays !== undefined
 			? {
-					optimizeExecutorStepDelays:
-						overrides.optimizeExecutorStepDelays,
+					optimizeExecutorStepDelays: overrides.optimizeExecutorStepDelays,
 				}
 			: {}),
 		...(overrides.optimizeTextInput !== undefined
@@ -101,10 +94,6 @@ export function setConfigFeatureFlags(
 	if (flags.preExecutionDomPruning !== undefined) {
 		configFeatureFlags.preExecutionDomPruning =
 			flags.preExecutionDomPruning;
-	}
-	if (flags.omitExecutorThinkingField !== undefined) {
-		configFeatureFlags.omitExecutorThinkingField =
-			flags.omitExecutorThinkingField;
 	}
 	if (flags.websiteAPIficationTools !== undefined) {
 		configFeatureFlags.websiteAPIficationTools =

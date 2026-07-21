@@ -80,7 +80,6 @@ describe("llm-env", () => {
 				agentTakeoverTool: false,
 				dismissCookieBanner: true,
 				preExecutionDomPruning: true,
-				omitExecutorThinkingField: true,
 				websiteAPIficationTools: false,
 			},
 			headless: false,

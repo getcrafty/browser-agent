@@ -13,7 +13,10 @@ import {
 } from "../src/config-feature-flags.js";
 import { CONTEXT_DIR, STEPS_DIR } from "../src/browser/constants.js";
 import { featureFlags } from "../src/featureFlags.js";
-import { resetStepsDir, setRuntimeOptions } from "../src/runtime-options.js";
+import {
+	resetStepsDir,
+	setRuntimeOptions,
+} from "../src/runtime-options.js";
 import {
 	closeSession,
 	createPromptForStep,
@@ -37,8 +40,6 @@ function deferred<T = void>(): {
 }
 
 describe("core-api", () => {
-	const originalOmitExecutorThinkingField =
-		configFeatureFlags.omitExecutorThinkingField;
 	const originalExecutorReasoningTraceContext =
 		featureFlags.executorReasoningTraceContext;
 	const originalIncrementalDomContext = featureFlags.incrementalDomContext;
@@ -47,8 +48,6 @@ describe("core-api", () => {
 		configFeatureFlags.websiteAPIficationTools;
 
 	afterEach(() => {
-		configFeatureFlags.omitExecutorThinkingField =
-			originalOmitExecutorThinkingField;
 		featureFlags.executorReasoningTraceContext =
 			originalExecutorReasoningTraceContext;
 		featureFlags.incrementalDomContext = originalIncrementalDomContext;
@@ -216,9 +215,7 @@ describe("core-api", () => {
 				assert.strictEqual(result.prompt.payload.html, "");
 				assert.isUndefined(result.prompt.payload.validBids);
 				assert.include(
-					JSON.stringify(
-						result.prompt.payload.interactionErrors ?? [],
-					),
+					JSON.stringify(result.prompt.payload.interactionErrors ?? []),
 					"context(html): Could not find node with given id",
 				);
 			}
@@ -264,14 +261,11 @@ describe("core-api", () => {
 			assert.strictEqual(screenshotAttempts, 2);
 			if (result.mode === "create_prompt_for_step") {
 				assert.strictEqual(
-					result.prompt.payload
-						.currentPageScreenshotIncludedAsImagePart,
+					result.prompt.payload.currentPageScreenshotIncludedAsImagePart,
 					true,
 				);
 				assert.notInclude(
-					JSON.stringify(
-						result.prompt.payload.interactionErrors ?? [],
-					),
+					JSON.stringify(result.prompt.payload.interactionErrors ?? []),
 					"context(pre_step_screenshot)",
 				);
 			}
@@ -314,9 +308,7 @@ describe("core-api", () => {
 				assert.isFalse(
 					result.prompt.messages.some((message) =>
 						Array.isArray(message.content)
-							? message.content.some(
-									(part) => part.type === "image_url",
-								)
+							? message.content.some((part) => part.type === "image_url")
 							: false,
 					),
 				);
@@ -448,9 +440,7 @@ describe("core-api", () => {
 				result.prompt.payload.autoTabSwitchNote,
 				"Auto-switched to first newly opened tab.",
 			);
-			assert.deepEqual(result.prompt.payload.newlyOpenedTabs, [
-				"Results",
-			]);
+			assert.deepEqual(result.prompt.payload.newlyOpenedTabs, ["Results"]);
 			assert.strictEqual(
 				result.prompt.payload.html,
 				'div bid="2": results',
@@ -515,9 +505,7 @@ describe("core-api", () => {
 				result.prompt.payload.autoTabSwitchNote,
 				"Auto-switched to first newly opened tab.",
 			);
-			assert.deepEqual(result.prompt.payload.newlyOpenedTabs, [
-				"Results",
-			]);
+			assert.deepEqual(result.prompt.payload.newlyOpenedTabs, ["Results"]);
 			assert.strictEqual(
 				result.prompt.payload.html,
 				'div bid="2": results',
@@ -612,10 +600,7 @@ describe("core-api", () => {
 		assert.strictEqual(result.mode, "create_prompt_for_step");
 		assert.strictEqual(domCalls, 3);
 		if (result.mode === "create_prompt_for_step") {
-			assert.strictEqual(
-				result.prompt.payload.html,
-				'div bid="1": ready',
-			);
+			assert.strictEqual(result.prompt.payload.html, 'div bid="1": ready');
 		}
 	});
 
@@ -1107,64 +1092,55 @@ describe("core-api", () => {
 	});
 
 	it("step(process_model_step_output) normalizes model output and appends stripped history", async () => {
-		const originalOmitThinking =
-			configFeatureFlags.omitExecutorThinkingField;
-		setConfigFeatureFlags({ omitExecutorThinkingField: true });
 		const deps = createMockCoreDeps();
 		const stepsHistory: Array<{
 			payload: Record<string, unknown>;
 			assistant: unknown;
 		}> = [];
 
-		try {
-			const result = await step(deps, {
-				mode: "process_model_step_output",
-				rawStepOutput: {
-					thinking: "plan",
-					tools: [{ click: "1" }],
-					done: false,
-					result: { foo: "bar" },
-				},
-				promptPayload: {
-					task: "task",
-					plan: ["Step 1"],
-					html: "<div>dom</div>",
-					validBids: ["1"],
-					currentURL: "https://example.com",
-				},
-				stepsHistory,
-			});
-
-			assert.strictEqual(result.mode, "process_model_step_output");
-			if (result.mode === "process_model_step_output") {
-				assert.strictEqual(result.step.done, false);
-				assert.strictEqual(result.step.actions.length, 1);
-			}
-			assert.strictEqual(stepsHistory.length, 1);
-			assert.deepEqual(stepsHistory[0].payload, {
+		const result = await step(deps, {
+			mode: "process_model_step_output",
+			rawStepOutput: {
+				thinking: "plan",
+				tools: [{ click: "1" }],
+				done: false,
+				result: { foo: "bar" },
+			},
+			promptPayload: {
+				task: "task",
+				plan: ["Step 1"],
+				html: "<div>dom</div>",
+				validBids: ["1"],
 				currentURL: "https://example.com",
-			});
-			assert.notProperty(
-				stepsHistory[0].assistant as Record<string, unknown>,
-				"thinking",
-			);
-			assert.deepEqual(
-				(stepsHistory[0].assistant as Record<string, unknown>).tools,
-				[{ click: "1" }],
-			);
-			assert.notProperty(
-				stepsHistory[0].assistant as Record<string, unknown>,
-				"done",
-			);
-			assert.notProperty(
-				stepsHistory[0].assistant as Record<string, unknown>,
-				"result",
-			);
-		} finally {
-			setConfigFeatureFlags({
-				omitExecutorThinkingField: originalOmitThinking,
-			});
+			},
+			stepsHistory,
+		});
+
+		assert.strictEqual(result.mode, "process_model_step_output");
+		if (result.mode === "process_model_step_output") {
+			assert.strictEqual(result.step.done, false);
+			assert.strictEqual(result.step.actions.length, 1);
 		}
+		assert.strictEqual(stepsHistory.length, 1);
+		assert.deepEqual(stepsHistory[0].payload, {
+			currentURL: "https://example.com",
+		});
+		assert.notProperty(
+			stepsHistory[0].assistant as Record<string, unknown>,
+			"thinking",
+		);
+		assert.deepEqual(
+			(stepsHistory[0].assistant as Record<string, unknown>).tools,
+			[{ click: "1" }],
+		);
+		assert.notProperty(
+			stepsHistory[0].assistant as Record<string, unknown>,
+			"done",
+		);
+		assert.notProperty(
+			stepsHistory[0].assistant as Record<string, unknown>,
+			"result",
+		);
 	});
 
 	it("step(process_model_step_output) omits OpenAI reasoning traces when incremental context is disabled", async () => {
@@ -1264,7 +1240,10 @@ describe("core-api", () => {
 		assert.isFalse(result.successful);
 		assert.isUndefined(result.step.result);
 		assert.isDefined(result.browse);
-		const assistant = stepsHistory[0]?.assistant as Record<string, unknown>;
+		const assistant = stepsHistory[0]?.assistant as Record<
+			string,
+			unknown
+		>;
 		assert.deepEqual(assistant.tools, []);
 		assert.notProperty(assistant, "done");
 		assert.notProperty(assistant, "result");
@@ -1323,9 +1302,6 @@ describe("core-api", () => {
 	});
 
 	it("processModelOutputAndBrowse passes stripped prior step history to the verifier", async () => {
-		const originalOmitThinking =
-			configFeatureFlags.omitExecutorThinkingField;
-		setConfigFeatureFlags({ omitExecutorThinkingField: true });
 		let capturedHistory:
 			import("../src/agents/types.js").Message[] | undefined;
 		const deps = createMockCoreDeps({
@@ -1347,7 +1323,6 @@ describe("core-api", () => {
 		});
 		await createSession(deps, { port: 9222, headless: true });
 
-		try {
 			const result = await processModelOutputAndBrowse(deps, 9222, {
 				mode: "process_model_step_output",
 				rawStepOutput: {
@@ -1400,20 +1375,11 @@ describe("core-api", () => {
 				String(capturedHistory?.[3]?.content ?? ""),
 				"return_results",
 			);
-		} finally {
-			setConfigFeatureFlags({
-				omitExecutorThinkingField: originalOmitThinking,
-			});
-		}
 	});
 
-	it("processModelOutputAndBrowse keeps thinking in verifier history when omit flag is disabled", async () => {
-		const originalOmitThinking =
-			configFeatureFlags.omitExecutorThinkingField;
-		setConfigFeatureFlags({ omitExecutorThinkingField: false });
+	it("processModelOutputAndBrowse always omits thinking from verifier history", async () => {
 		let capturedHistory: Array<{ role: string; content: unknown }> | null =
 			null;
-		try {
 			const deps = createMockCoreDeps({
 				verifyTaskSuccess: async (input) => {
 					capturedHistory = input.historyMessages.map((message) => ({
@@ -1462,15 +1428,10 @@ describe("core-api", () => {
 			});
 
 			assert.strictEqual(capturedHistory?.[1]?.role, "assistant");
-			assert.include(
+			assert.notInclude(
 				String(capturedHistory?.[1]?.content ?? ""),
-				"thinking: Click the button",
+				"thinking:",
 			);
-		} finally {
-			setConfigFeatureFlags({
-				omitExecutorThinkingField: originalOmitThinking,
-			});
-		}
 	});
 
 	it("processModelOutputAndBrowse browses when the model step is not done", async () => {
@@ -2572,9 +2533,7 @@ describe("core-api", () => {
 					pendingPlanRegeneration: false,
 					screenshotToolObservations: [],
 					screenshotToolCaptures: [],
-					...(actions.some(
-						(action) => action.type === "return_results",
-					)
+					...(actions.some((action) => action.type === "return_results")
 						? { returnedResult: "Recovered result" }
 						: {}),
 				};
@@ -3034,9 +2993,7 @@ describe("core-api", () => {
 					pendingPlanRegeneration: false,
 					screenshotToolObservations: [],
 					screenshotToolCaptures: [],
-					...(actions.some(
-						(action) => action.type === "return_results",
-					)
+					...(actions.some((action) => action.type === "return_results")
 						? { returnedResult: "Success" }
 						: {}),
 				};
@@ -3116,8 +3073,7 @@ describe("core-api", () => {
 		const buildDeps = () =>
 			createMockCoreDeps({
 				getCurrentURL: async () =>
-					tabs.find((tab) => tab.targetId === currentTargetId)?.url ??
-					"",
+					tabs.find((tab) => tab.targetId === currentTargetId)?.url ?? "",
 				getSimplifiedDOM: async () =>
 					currentTargetId === "tab-1"
 						? 'div bid="1": search'
@@ -3288,10 +3244,8 @@ describe("core-api", () => {
 									previousStepPlanUpdate: [],
 									previousStepStatus: "progressed",
 									previousStepOutcome: "Clicked the result.",
-									currentStateObservation:
-										"Result content is visible.",
-									nextActionRationale:
-										"Return the requested result.",
+									currentStateObservation: "Result content is visible.",
+									nextActionRationale: "Return the requested result.",
 									actions: [{ type: "return_results" }],
 								},
 								usage: {
@@ -3314,9 +3268,7 @@ describe("core-api", () => {
 				),
 				"missing fixed-delay step timing log",
 			);
-			assert.isFalse(
-				logs.some((entry) => entry.includes("token-timing")),
-			);
+			assert.isFalse(logs.some((entry) => entry.includes("token-timing")));
 		} finally {
 			console.log = originalConsoleLog;
 		}
@@ -3449,9 +3401,7 @@ describe("core-api", () => {
 			assert.isFalse(
 				fs.existsSync(path.join(CONTEXT_DIR, "context-001.yaml")),
 			);
-			assert.isFalse(
-				fs.existsSync(path.join(STEPS_DIR, "step-001.yaml")),
-			);
+			assert.isFalse(fs.existsSync(path.join(STEPS_DIR, "step-001.yaml")));
 		} finally {
 			fs.rmSync(artifactsRoot, { recursive: true, force: true });
 			setRuntimeOptions({ saveStepsContext: true });
@@ -3543,9 +3493,7 @@ describe("core-api", () => {
 							actions: [
 								{
 									type:
-										stepNumber === 2
-											? "memory_read"
-											: "return_results",
+										stepNumber === 2 ? "memory_read" : "return_results",
 								},
 							],
 							done: false,
@@ -3577,10 +3525,7 @@ describe("core-api", () => {
 			);
 			assert.strictEqual(
 				fs.readFileSync(
-					path.join(
-						contextDir,
-						"extract-data-memory-001.pre-llm.txt",
-					),
+					path.join(contextDir, "extract-data-memory-001.pre-llm.txt"),
 					"utf-8",
 				),
 				"",
@@ -3604,10 +3549,7 @@ describe("core-api", () => {
 			);
 			assert.strictEqual(
 				fs.readFileSync(
-					path.join(
-						contextDir,
-						"extract-data-memory-002.pre-llm.txt",
-					),
+					path.join(contextDir, "extract-data-memory-002.pre-llm.txt"),
 					"utf-8",
 				),
 				"",
@@ -3633,8 +3575,6 @@ describe("core-api", () => {
 		const deps = createMockCoreDeps();
 		const originalPreStepScreenshot =
 			configFeatureFlags.preStepScreenshotInLatestUserPrompt;
-		const originalOmitThinking =
-			configFeatureFlags.omitExecutorThinkingField;
 		let capturedStepTwoMessages: Array<{
 			role: string;
 			content: unknown;
@@ -3644,7 +3584,6 @@ describe("core-api", () => {
 			resetStepsDir();
 			setConfigFeatureFlags({
 				preStepScreenshotInLatestUserPrompt: false,
-				omitExecutorThinkingField: true,
 			});
 
 			const result = await runAgent(deps, {
@@ -3685,12 +3624,9 @@ describe("core-api", () => {
 						return {
 							data: {
 								previousStepStatus: "progressed",
-								previousStepOutcome:
-									"Entered the departure details.",
-								currentStateObservation:
-									"The search form is populated.",
-								nextActionRationale:
-									"Submit the search to load results.",
+								previousStepOutcome: "Entered the departure details.",
+								currentStateObservation: "The search form is populated.",
+								nextActionRationale: "Submit the search to load results.",
 								actions: [],
 								done: false,
 							},
@@ -3743,7 +3679,6 @@ describe("core-api", () => {
 		} finally {
 			setConfigFeatureFlags({
 				preStepScreenshotInLatestUserPrompt: originalPreStepScreenshot,
-				omitExecutorThinkingField: originalOmitThinking,
 			});
 			setRuntimeOptions({ saveStepsContext: true });
 			resetStepsDir();
@@ -3803,8 +3738,7 @@ describe("core-api", () => {
 									output_tokens: 3,
 									total_tokens: 11,
 								},
-								reasoning_tokens:
-									"Inspect page:\nstatus: ready",
+								reasoning_tokens: "Inspect page:\nstatus: ready",
 							}
 						: {
 								data: {
@@ -3858,13 +3792,10 @@ describe("core-api", () => {
 	it("runAgent logs action-context fields before action execution lines", async () => {
 		const logs: string[] = [];
 		const originalConsoleLog = console.log;
-		const originalOmitThinking =
-			configFeatureFlags.omitExecutorThinkingField;
 		console.log = (...args: unknown[]) => {
 			logs.push(args.map((value) => String(value)).join(" "));
 		};
 		try {
-			setConfigFeatureFlags({ omitExecutorThinkingField: true });
 			const deps = createMockCoreDeps({
 				executeActions: async ({ actions }) => {
 					for (const action of actions ?? []) {
@@ -3878,9 +3809,7 @@ describe("core-api", () => {
 						pendingPlanRegeneration: false,
 						screenshotToolObservations: [],
 						screenshotToolCaptures: [],
-						...(actions.some(
-							(action) => action.type === "return_results",
-						)
+						...(actions.some((action) => action.type === "return_results")
 							? { returnedResult: "Success" }
 							: {}),
 					};
@@ -3916,8 +3845,7 @@ describe("core-api", () => {
 						return {
 							data: {
 								previousStepStatus: "progressed",
-								previousStepOutcome:
-									"Filled the departure station.",
+								previousStepOutcome: "Filled the departure station.",
 								currentStateObservation:
 									"The search form is partially populated.",
 								nextActionRationale:
@@ -3937,8 +3865,7 @@ describe("core-api", () => {
 						data: {
 							previousStepStatus: "progressed",
 							previousStepOutcome: "Results loaded.",
-							currentStateObservation:
-								"The target fare is visible.",
+							currentStateObservation: "The target fare is visible.",
 							nextActionRationale: "Return the final answer.",
 							actions: [{ type: "return_results" }],
 						},
@@ -3979,9 +3906,6 @@ describe("core-api", () => {
 			assert.isBelow(stateIndex, clickIndex);
 			assert.isBelow(rationaleIndex, clickIndex);
 		} finally {
-			setConfigFeatureFlags({
-				omitExecutorThinkingField: originalOmitThinking,
-			});
 			console.log = originalConsoleLog;
 		}
 	});
@@ -3991,9 +3915,7 @@ describe("core-api", () => {
 			verifyTaskSuccess: async () => ({
 				success: false,
 				summary: "Task stopped before the required upload completed.",
-				reasons: [
-					"The final result described a partial/manual outcome.",
-				],
+				reasons: ["The final result described a partial/manual outcome."],
 				model: "gpt-test",
 				provider: "openai",
 				usage: {
@@ -4058,7 +3980,6 @@ describe("core-api", () => {
 				agentTakeoverTool: false,
 				dismissCookieBanner: true,
 				preExecutionDomPruning: true,
-				omitExecutorThinkingField: true,
 				websiteAPIficationTools: false,
 			},
 		});
@@ -4106,7 +4027,9 @@ describe("core-api", () => {
 		const session = deps.registry.get(9222);
 		assert.isDefined(session?.authTakeover);
 		assert.isDefined(session?.authTakeover?.requestAuthDomainCandidates);
-		assert.isDefined(session?.authTakeover?.requestAuthIdentifierForDomain);
+		assert.isDefined(
+			session?.authTakeover?.requestAuthIdentifierForDomain,
+		);
 		assert.isDefined(session?.authTakeover?.requestAuthPasswordForDomain);
 		await closeSession(deps, 9222);
 	});
@@ -4186,13 +4109,10 @@ describe("core-api", () => {
 				agentTakeoverTool: false,
 				dismissCookieBanner: true,
 				preExecutionDomPruning: true,
-				omitExecutorThinkingField: true,
 				websiteAPIficationTools: false,
 			},
 			executeActions: async (params) =>
-				params.actions.some(
-					(action) => action.type === "return_results",
-				)
+				params.actions.some((action) => action.type === "return_results")
 					? {
 							pendingMemoryRead: false,
 							interactionErrors: [],
@@ -4245,8 +4165,7 @@ describe("core-api", () => {
 									{
 										type: "user_takeover",
 										category: "authentication",
-										request:
-											"Enter your login credentials.",
+										request: "Enter your login credentials.",
 									},
 								],
 								done: false,
@@ -4293,7 +4212,6 @@ describe("core-api", () => {
 				agentTakeoverTool: false,
 				dismissCookieBanner: true,
 				preExecutionDomPruning: true,
-				omitExecutorThinkingField: true,
 				websiteAPIficationTools: false,
 			},
 			executeActions: async (params) =>
@@ -4402,8 +4320,7 @@ describe("core-api", () => {
 									{
 										type: "user_takeover",
 										category: "authentication",
-										request:
-											"Enter your login credentials.",
+										request: "Enter your login credentials.",
 									},
 								],
 								done: false,
@@ -4469,13 +4386,10 @@ describe("core-api", () => {
 				agentTakeoverTool: false,
 				dismissCookieBanner: true,
 				preExecutionDomPruning: true,
-				omitExecutorThinkingField: true,
 				websiteAPIficationTools: false,
 			},
 			executeActions: async (params) =>
-				params.actions.some(
-					(action) => action.type === "return_results",
-				)
+				params.actions.some((action) => action.type === "return_results")
 					? {
 							pendingMemoryRead: false,
 							interactionErrors: [],
@@ -4528,8 +4442,7 @@ describe("core-api", () => {
 									{
 										type: "user_takeover",
 										category: "authentication",
-										request:
-											"Enter your login credentials.",
+										request: "Enter your login credentials.",
 									},
 								],
 								done: false,
@@ -4576,7 +4489,6 @@ describe("core-api", () => {
 				agentTakeoverTool: false,
 				dismissCookieBanner: true,
 				preExecutionDomPruning: true,
-				omitExecutorThinkingField: true,
 				websiteAPIficationTools: false,
 			},
 			executeActions: async (params) =>
@@ -4658,7 +4570,6 @@ describe("core-api", () => {
 				agentTakeoverTool: false,
 				dismissCookieBanner: false,
 				preExecutionDomPruning: false,
-				omitExecutorThinkingField: true,
 				websiteAPIficationTools: false,
 			},
 			dismissCookieBanner: async () => {

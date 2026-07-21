@@ -344,7 +344,9 @@ export function buildStepMessages(params: {
 	const payload = { ...params.payload };
 	delete payload.validBids;
 	const payloadText = yaml.dump(payload);
-	const contentParts: ContentPart[] = [{ type: "text", text: payloadText }];
+	const contentParts: ContentPart[] = [
+		{ type: "text", text: payloadText },
+	];
 
 	if (params.currentPageScreenshotDataUrl) {
 		contentParts.push({
@@ -433,9 +435,15 @@ export async function saveStepContextIfNeeded(params: {
 	fs.mkdirSync(params.contextDir, { recursive: true });
 	fs.mkdirSync(params.stepsDir, { recursive: true });
 
-	const contextFile = path.join(params.contextDir, `context-${stepId}.yaml`);
+	const contextFile = path.join(
+		params.contextDir,
+		`context-${stepId}.yaml`,
+	);
 	const stepYamlFile = path.join(params.stepsDir, `step-${stepId}.yaml`);
-	const rawHtmlFile = path.join(params.contextDir, `raw-html-${stepId}.html`);
+	const rawHtmlFile = path.join(
+		params.contextDir,
+		`raw-html-${stepId}.html`,
+	);
 	const memorySnapshotFile = params.memorySnapshotPhase
 		? path.join(
 				params.contextDir,
@@ -527,9 +535,6 @@ export function logStepModelResponse(params: {
 		}
 	}
 	logStepActionContext(params.step);
-	if (!configFeatureFlags.omitExecutorThinkingField && params.step.thinking) {
-		console.log(`    💭 ${params.step.thinking}`);
-	}
 }
 
 export function logStepActionContext(step: StepResult): void {
@@ -674,9 +679,6 @@ export function formatStepForPrompt(
 	options: ExecutorPromptOptions = {},
 ): Record<string, unknown> {
 	const formatted: Record<string, unknown> = {};
-	if (!configFeatureFlags.omitExecutorThinkingField) {
-		formatted.thinking = step.thinking;
-	}
 	if (featureFlags.enablePlanning) {
 		formatted.previousStepPlanUpdate = step.previousStepPlanUpdate;
 	}

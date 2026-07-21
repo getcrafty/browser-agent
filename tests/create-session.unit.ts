@@ -41,7 +41,6 @@ function createDeps(params: {
 			agentTakeoverTool: false,
 			dismissCookieBanner: true,
 			preExecutionDomPruning: true,
-			omitExecutorThinkingField: true,
 			websiteAPIficationTools: false,
 		},
 		userActionBehavior: "block",

@@ -4,7 +4,6 @@ import { userMessage } from "../agents/providers/router.js";
 import { formatStepForPrompt } from "../agents/executor-utils/step-execution.js";
 import { normalizeActionList } from "../agents/executor-utils/action-normalization.js";
 import type { StepHistoryEntry } from "./types.js";
-import { configFeatureFlags } from "../config-feature-flags.js";
 import { stripDomContextFromHistoryPayload } from "../agents/executor-utils/history-payload.js";
 import type { PreviousStepStatus } from "../agents/types.js";
 import { featureFlags } from "../featureFlags.js";
@@ -50,9 +49,7 @@ function toCanonicalAssistantContent(
 		obj.actionContext && typeof obj.actionContext === "object"
 			? (obj.actionContext as Record<string, unknown>)
 			: null;
-	const normalizePreviousStepStatus = (
-		value: unknown,
-	): PreviousStepStatus => {
+	const normalizePreviousStepStatus = (value: unknown): PreviousStepStatus => {
 		switch (value) {
 			case "none":
 			case "progressed":
@@ -69,11 +66,7 @@ function toCanonicalAssistantContent(
 	const normalizeShortText = (value: unknown): string =>
 		typeof value === "string" ? value.trim() : "";
 	const step: StepResult = {
-		thinking:
-			!configFeatureFlags.omitExecutorThinkingField &&
-			typeof obj.thinking === "string"
-				? obj.thinking
-				: "",
+		thinking: "",
 		previousStepPlanUpdate: [],
 		previousStepStatus: normalizePreviousStepStatus(
 			obj.previousStepStatus ?? actionContext?.status,

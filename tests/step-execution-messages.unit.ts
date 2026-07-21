@@ -108,10 +108,7 @@ describe("step-execution-messages", () => {
 			screenshotToolObservations: buildObservations(),
 		});
 
-		assert.deepEqual(
-			payload.screenshotToolObservations,
-			buildObservations(),
-		);
+		assert.deepEqual(payload.screenshotToolObservations, buildObservations());
 	});
 
 	it("includes successful website tool results in the executor payload", () => {
@@ -152,10 +149,7 @@ describe("step-execution-messages", () => {
 			currentPageScreenshotIncludedAsImagePart: true,
 		});
 
-		assert.strictEqual(
-			payload.currentPageScreenshotIncludedAsImagePart,
-			true,
-		);
+		assert.strictEqual(payload.currentPageScreenshotIncludedAsImagePart, true);
 	});
 
 	it("omits validBids from payload and prompt messages", () => {
@@ -256,10 +250,7 @@ describe("step-execution-messages", () => {
 
 			assert.strictEqual(pendingMemoryRead, false);
 			assert.isUndefined(payload.memoryContent);
-			assert.strictEqual(
-				payload.memoryAvailable,
-				PREPARED_MEMORY_CONTEXT_HINT,
-			);
+			assert.strictEqual(payload.memoryAvailable, PREPARED_MEMORY_CONTEXT_HINT);
 		} finally {
 			featureFlags.enablePlanning = originalEnablePlanning;
 		}
@@ -389,8 +380,7 @@ describe("step-execution-messages", () => {
 					captures: [
 						{
 							bid: "10",
-							imageBase64:
-								Buffer.from("fake-png").toString("base64"),
+							imageBase64: Buffer.from("fake-png").toString("base64"),
 						},
 					],
 				},
@@ -423,8 +413,7 @@ describe("step-execution-messages", () => {
 			history: [],
 			payload: { task: "task", html: "dom" },
 			currentPageScreenshotDataUrl:
-				"data:image/jpeg;base64," +
-				Buffer.from("fake-jpeg").toString("base64"),
+				"data:image/jpeg;base64," + Buffer.from("fake-jpeg").toString("base64"),
 		});
 
 		assert.strictEqual(messages.length, 2);
@@ -622,10 +611,7 @@ describe("step-execution-messages", () => {
 		const contextDir = path.join(tmpDir, "context");
 		const stepsDir = path.join(tmpDir, "steps");
 		const memoryFile = path.join(tmpDir, "memory.txt");
-		const extractDataMemoryFile = path.join(
-			tmpDir,
-			"extract-data-memory.txt",
-		);
+		const extractDataMemoryFile = path.join(tmpDir, "extract-data-memory.txt");
 
 		try {
 			fs.writeFileSync(memoryFile, "pre memory state", "utf-8");
@@ -635,10 +621,7 @@ describe("step-execution-messages", () => {
 				"utf-8",
 			);
 			browser = await launch(undefined, true);
-			await navigate(
-				browser,
-				"data:text/html,<html><body>ok</body></html>",
-			);
+			await navigate(browser, "data:text/html,<html><body>ok</body></html>");
 
 			await saveStepContextIfNeeded({
 				saveStepsContext: true,
@@ -672,8 +655,7 @@ describe("step-execution-messages", () => {
 						captures: [
 							{
 								bid: "12x",
-								imageBase64:
-									Buffer.from("fake-png").toString("base64"),
+								imageBase64: Buffer.from("fake-png").toString("base64"),
 							},
 						],
 					},
@@ -690,14 +672,9 @@ describe("step-execution-messages", () => {
 			assert(contextYaml.includes("line one\n"));
 			assert(contextYaml.includes("line two"));
 			const parsed = yaml.load(contextYaml) as Array<{
-				content: Array<
-					{ text?: string } | { image_url?: { url?: string } }
-				>;
+				content: Array<{ text?: string } | { image_url?: { url?: string } }>;
 			}>;
-			assert.strictEqual(
-				parsed[1]?.content?.[0]?.text,
-				"line one\nline two",
-			);
+			assert.strictEqual(parsed[1]?.content?.[0]?.text, "line one\nline two");
 			const screenshotPath = path.join(
 				contextDir,
 				"screenshots",
@@ -717,10 +694,7 @@ describe("step-execution-messages", () => {
 			);
 			assert.strictEqual(
 				fs.readFileSync(
-					path.join(
-						contextDir,
-						"extract-data-memory-001.pre-llm.txt",
-					),
+					path.join(contextDir, "extract-data-memory-001.pre-llm.txt"),
 					"utf-8",
 				),
 				"pre extract data memory state",
@@ -754,10 +728,7 @@ describe("step-execution-messages", () => {
 			);
 			assert.strictEqual(
 				fs.readFileSync(
-					path.join(
-						contextDir,
-						"extract-data-memory-001.post-actions.txt",
-					),
+					path.join(contextDir, "extract-data-memory-001.post-actions.txt"),
 					"utf-8",
 				),
 				"post extract data memory state",

@@ -2,10 +2,6 @@ import { assert } from "chai";
 import { describe, it } from "mocha";
 import { stripPayloadForHistory } from "../src/agents/executor-utils/history-payload.js";
 import { featureFlags } from "../src/featureFlags.js";
-import {
-	configFeatureFlags,
-	setConfigFeatureFlags,
-} from "../src/config-feature-flags.js";
 import { buildHistoryMessagesFromFullStepHistory } from "../src/core/history-adapter.js";
 
 describe("history prompt safety", () => {
@@ -50,8 +46,7 @@ describe("history prompt safety", () => {
 	});
 
 	it("retains incremental HTML while stripping sensitive fields", () => {
-		const originalIncrementalDomContext =
-			featureFlags.incrementalDomContext;
+		const originalIncrementalDomContext = featureFlags.incrementalDomContext;
 		featureFlags.incrementalDomContext = true;
 		try {
 			const stepsHistory = [
@@ -91,11 +86,8 @@ describe("history prompt safety", () => {
 	});
 
 	it("canonicalizes history assistant messages for strings, arbitrary objects, and step-like records", () => {
-		const originalOmitThinking =
-			configFeatureFlags.omitExecutorThinkingField;
 		const originalActionContext = featureFlags.executorActionContextFields;
 		const originalEnablePlanning = featureFlags.enablePlanning;
-		setConfigFeatureFlags({ omitExecutorThinkingField: true });
 		featureFlags.executorActionContextFields = false;
 		featureFlags.enablePlanning = true;
 		try {
@@ -184,10 +176,7 @@ describe("history prompt safety", () => {
 			assert.strictEqual(messages[1].role, "assistant");
 			assert.strictEqual(messages[1].content, "plain string assistant");
 			assert.strictEqual(messages[3].role, "assistant");
-			assert.include(
-				String(messages[3].content),
-				"custom: object assistant",
-			);
+			assert.include(String(messages[3].content), "custom: object assistant");
 			assert.strictEqual(messages[5].role, "assistant");
 			assert.include(String(messages[5].content), "- array assistant");
 			assert.strictEqual(messages[7].role, "assistant");
@@ -213,19 +202,13 @@ describe("history prompt safety", () => {
 			assert.notInclude(String(messages[17].content), "done:");
 			assert.notInclude(String(messages[17].content), "result:");
 		} finally {
-			setConfigFeatureFlags({
-				omitExecutorThinkingField: originalOmitThinking,
-			});
 			featureFlags.executorActionContextFields = originalActionContext;
 			featureFlags.enablePlanning = originalEnablePlanning;
 		}
 	});
 
 	it("includes action-context fields in canonicalized assistant messages when enabled", () => {
-		const originalOmitThinking =
-			configFeatureFlags.omitExecutorThinkingField;
 		const originalActionContext = featureFlags.executorActionContextFields;
-		setConfigFeatureFlags({ omitExecutorThinkingField: true });
 		featureFlags.executorActionContextFields = true;
 		try {
 			const messages = buildHistoryMessagesFromFullStepHistory([
@@ -238,8 +221,7 @@ describe("history prompt safety", () => {
 						previousStepOutcome: "Opened Gmail sign-in tab.",
 						currentStateObservation:
 							"Current tab is still the Workspace landing page.",
-						nextActionRationale:
-							"Switch to the Gmail tab to continue login.",
+						nextActionRationale: "Switch to the Gmail tab to continue login.",
 						actions: [{ type: "switch_tab", index: 1 }],
 						done: false,
 					},
@@ -267,18 +249,12 @@ describe("history prompt safety", () => {
 			assert.notInclude(String(messages[1].content), "done:");
 			assert.notInclude(String(messages[1].content), "result:");
 		} finally {
-			setConfigFeatureFlags({
-				omitExecutorThinkingField: originalOmitThinking,
-			});
 			featureFlags.executorActionContextFields = originalActionContext;
 		}
 	});
 
-	it("includes thinking and action-context fields in canonicalized assistant messages when both are enabled", () => {
-		const originalOmitThinking =
-			configFeatureFlags.omitExecutorThinkingField;
+	it("omits legacy thinking fields from canonicalized assistant messages", () => {
 		const originalActionContext = featureFlags.executorActionContextFields;
-		setConfigFeatureFlags({ omitExecutorThinkingField: false });
 		featureFlags.executorActionContextFields = true;
 		try {
 			const messages = buildHistoryMessagesFromFullStepHistory([
@@ -299,7 +275,7 @@ describe("history prompt safety", () => {
 				},
 			]);
 			assert.strictEqual(messages[1].role, "assistant");
-			assert.include(String(messages[1].content), "thinking: Done");
+			assert.notInclude(String(messages[1].content), "thinking:");
 			assert.include(
 				String(messages[1].content),
 				"previousStepStatus: progressed",
@@ -321,22 +297,15 @@ describe("history prompt safety", () => {
 			assert.notInclude(String(messages[1].content), "done:");
 			assert.notInclude(String(messages[1].content), "result:");
 		} finally {
-			setConfigFeatureFlags({
-				omitExecutorThinkingField: originalOmitThinking,
-			});
 			featureFlags.executorActionContextFields = originalActionContext;
 		}
 	});
 
 	it("injects reasoning traces for eligible providers or incremental context", () => {
-		const originalOmitThinking =
-			configFeatureFlags.omitExecutorThinkingField;
 		const originalActionContext = featureFlags.executorActionContextFields;
 		const originalReasoningTraceContext =
 			featureFlags.executorReasoningTraceContext;
-		const originalIncrementalDomContext =
-			featureFlags.incrementalDomContext;
-		setConfigFeatureFlags({ omitExecutorThinkingField: true });
+		const originalIncrementalDomContext = featureFlags.incrementalDomContext;
 		featureFlags.executorActionContextFields = true;
 		featureFlags.executorReasoningTraceContext = true;
 		featureFlags.incrementalDomContext = false;
@@ -356,19 +325,15 @@ describe("history prompt safety", () => {
 		];
 
 		try {
-			const nonOpenAI = buildHistoryMessagesFromFullStepHistory(
-				stepsHistory,
-				{ provider: "vllm" },
-			);
+			const nonOpenAI = buildHistoryMessagesFromFullStepHistory(stepsHistory, {
+				provider: "vllm",
+			});
 			const nonOpenAIContent = String(nonOpenAI[1].content);
 			assert.include(
 				nonOpenAIContent,
 				"<think>\nInspect page:\nstatus: ready\n</think>",
 			);
-			assert.strictEqual(
-				nonOpenAIContent.split("Inspect page:").length - 1,
-				1,
-			);
+			assert.strictEqual(nonOpenAIContent.split("Inspect page:").length - 1, 1);
 			assert.notInclude(nonOpenAIContent, "previousStepStatus");
 			assert.notInclude(nonOpenAIContent, "previousStepOutcome");
 			assert.notInclude(nonOpenAIContent, "currentStateObservation");
@@ -377,12 +342,9 @@ describe("history prompt safety", () => {
 			assert.notInclude(nonOpenAIContent, "done:");
 			assert.notInclude(nonOpenAIContent, "result:");
 
-			const openAI = buildHistoryMessagesFromFullStepHistory(
-				stepsHistory,
-				{
-					provider: "openai",
-				},
-			);
+			const openAI = buildHistoryMessagesFromFullStepHistory(stepsHistory, {
+				provider: "openai",
+			});
 			const openAIContent = String(openAI[1].content);
 			assert.notInclude(openAIContent, "<think>");
 			assert.notInclude(openAIContent, "Inspect page:");
@@ -398,9 +360,7 @@ describe("history prompt safety", () => {
 					provider: "openai",
 				},
 			);
-			const incrementalOpenAIContent = String(
-				incrementalOpenAI[1].content,
-			);
+			const incrementalOpenAIContent = String(incrementalOpenAI[1].content);
 			assert.include(
 				incrementalOpenAIContent,
 				"<think>\nInspect page:\nstatus: ready\n</think>",
@@ -410,9 +370,6 @@ describe("history prompt safety", () => {
 				"previousStepStatus: progressed",
 			);
 		} finally {
-			setConfigFeatureFlags({
-				omitExecutorThinkingField: originalOmitThinking,
-			});
 			featureFlags.executorActionContextFields = originalActionContext;
 			featureFlags.executorReasoningTraceContext =
 				originalReasoningTraceContext;

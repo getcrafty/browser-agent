@@ -1,10 +1,7 @@
 import { assert } from "chai";
 import { describe, it } from "mocha";
 import { getExecutorSystem } from "../src/agents/prompts.js";
-import {
-	configFeatureFlags,
-	setConfigFeatureFlags,
-} from "../src/config-feature-flags.js";
+import { configFeatureFlags } from "../src/config-feature-flags.js";
 import { featureFlags } from "../src/featureFlags.js";
 import {
 	AUTH_TAKEOVER_FORM_SYSTEM,
@@ -102,11 +99,9 @@ describe("executor prompt user_takeover tool", () => {
 		}
 	});
 
-	it("omits thinking field requirements when omitExecutorThinkingField is enabled", () => {
-		const originalFlag = configFeatureFlags.omitExecutorThinkingField;
+	it("always omits thinking field requirements", () => {
 		const originalActionContext = featureFlags.executorActionContextFields;
 		const originalEnablePlanning = featureFlags.enablePlanning;
-		setConfigFeatureFlags({ omitExecutorThinkingField: true });
 		featureFlags.executorActionContextFields = false;
 		featureFlags.enablePlanning = true;
 		try {
@@ -127,17 +122,14 @@ describe("executor prompt user_takeover tool", () => {
 				`PUT ANY THINKING OR REASONING IN THE "thinking" FIELD OF THE YAML.`,
 			);
 		} finally {
-			setConfigFeatureFlags({ omitExecutorThinkingField: originalFlag });
 			featureFlags.executorActionContextFields = originalActionContext;
 			featureFlags.enablePlanning = originalEnablePlanning;
 		}
 	});
 
 	it("includes action-context schema when enabled alongside omitted thinking", () => {
-		const originalFlag = configFeatureFlags.omitExecutorThinkingField;
 		const originalActionContext = featureFlags.executorActionContextFields;
 		const originalEnablePlanning = featureFlags.enablePlanning;
-		setConfigFeatureFlags({ omitExecutorThinkingField: true });
 		featureFlags.executorActionContextFields = true;
 		featureFlags.enablePlanning = true;
 		try {
@@ -164,38 +156,6 @@ describe("executor prompt user_takeover tool", () => {
   Switch to the Gmail tab to continue login.`,
 			);
 		} finally {
-			setConfigFeatureFlags({ omitExecutorThinkingField: originalFlag });
-			featureFlags.executorActionContextFields = originalActionContext;
-			featureFlags.enablePlanning = originalEnablePlanning;
-		}
-	});
-
-	it("includes thinking and action-context schema when thinking is enabled", () => {
-		const originalFlag = configFeatureFlags.omitExecutorThinkingField;
-		const originalActionContext = featureFlags.executorActionContextFields;
-		const originalEnablePlanning = featureFlags.enablePlanning;
-		setConfigFeatureFlags({ omitExecutorThinkingField: false });
-		featureFlags.executorActionContextFields = true;
-		featureFlags.enablePlanning = true;
-		try {
-			const prompt = getExecutorSystem();
-			assert.include(
-				prompt,
-				`thinking: "Reasoning based on what you observe`,
-			);
-			assert.include(
-				prompt,
-				`Each key (thinking, previousStepPlanUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
-			);
-			assert.notInclude(prompt, "\ndone:");
-			assert.include(prompt, `previousStepStatus: "opened_tab"`);
-			assert.include(prompt, `previousStepStatus must be one of:`);
-			assert.include(
-				prompt,
-				`PUT ANY THINKING OR REASONING IN THE "thinking" FIELD OF THE YAML.`,
-			);
-		} finally {
-			setConfigFeatureFlags({ omitExecutorThinkingField: originalFlag });
 			featureFlags.executorActionContextFields = originalActionContext;
 			featureFlags.enablePlanning = originalEnablePlanning;
 		}
@@ -214,10 +174,7 @@ describe("executor prompt user_takeover tool", () => {
 		assert.include(AUTH_TAKEOVER_FORM_SYSTEM, `passwordBid: "N"`);
 		assert.include(AUTH_TAKEOVER_FORM_SYSTEM, `submitBid: "N"`);
 		assert.include(AUTH_TAKEOVER_FORM_SYSTEM, `continueBid: "N"`);
-		assert.include(
-			AUTH_TAKEOVER_FORM_SYSTEM,
-			`stayLoggedInCheckboxBid: "N"`,
-		);
+		assert.include(AUTH_TAKEOVER_FORM_SYSTEM, `stayLoggedInCheckboxBid: "N"`);
 		assert.include(AUTH_TAKEOVER_FORM_SYSTEM, `switchIdentifierBid: "N"`);
 		assert.include(AUTH_TAKEOVER_FORM_SYSTEM, `accountBid: "N"`);
 		assert.include(
@@ -261,10 +218,7 @@ describe("executor prompt user_takeover tool", () => {
 			AUTH_TAKEOVER_RESULT_SYSTEM,
 			`The DOM uses a compact bracket format:`,
 		);
-		assert.notInclude(
-			AUTH_TAKEOVER_FORM_SYSTEM,
-			`Each node starts with "<".`,
-		);
+		assert.notInclude(AUTH_TAKEOVER_FORM_SYSTEM, `Each node starts with "<".`);
 		assert.notInclude(
 			AUTH_TAKEOVER_RESULT_SYSTEM,
 			`Each node starts with "<".`,

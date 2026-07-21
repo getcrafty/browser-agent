@@ -4,24 +4,14 @@ import {
 	getExecutorSystem,
 	getExecutorSystemPlannerEmbed,
 } from "../src/agents/prompts.js";
-import {
-	configFeatureFlags,
-	setConfigFeatureFlags,
-} from "../src/config-feature-flags.js";
 import { featureFlags } from "../src/featureFlags.js";
 
 describe("executor reasoning prompt flags", () => {
-	const originalOmitExecutorThinkingField =
-		configFeatureFlags.omitExecutorThinkingField;
 	const originalReasoningTraceContext =
 		featureFlags.executorReasoningTraceContext;
 
 	afterEach(() => {
-		setConfigFeatureFlags({
-			omitExecutorThinkingField: originalOmitExecutorThinkingField,
-		});
-		featureFlags.executorReasoningTraceContext =
-			originalReasoningTraceContext;
+		featureFlags.executorReasoningTraceContext = originalReasoningTraceContext;
 	});
 
 	it("replaces action-context fields with reasoning trace context for non-OpenAI executors", () => {
@@ -54,18 +44,12 @@ describe("executor reasoning prompt flags", () => {
 	});
 
 	it("keeps provider-side effort independent from executor prompt instructions", () => {
-		setConfigFeatureFlags({
-			omitExecutorThinkingField: true,
-		});
 		const runAgentPrompt = getExecutorSystem();
 		const plannerEmbedPrompt = getExecutorSystemPlannerEmbed();
 
 		assert.include(runAgentPrompt, "previousStepStatus");
 		assert.notInclude(plannerEmbedPrompt, "previousStepStatus");
-		assert.include(
-			runAgentPrompt,
-			"ALWAYS THINK OR REASON BEFORE ANSWERING.",
-		);
+		assert.include(runAgentPrompt, "ALWAYS THINK OR REASON BEFORE ANSWERING.");
 	});
 
 	it("uses only current HTML bid instructions", () => {

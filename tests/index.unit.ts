@@ -54,7 +54,6 @@ function createConfig(overrides: Partial<Config> = {}): Config {
 			agentTakeoverTool: false,
 			dismissCookieBanner: true,
 			preExecutionDomPruning: true,
-			omitExecutorThinkingField: true,
 			websiteAPIficationTools: false,
 		},
 		headless: true,
@@ -208,10 +207,7 @@ describe("index main", () => {
 		}
 
 		assert.isNotNull(capturedRunTaskInput);
-		assert.strictEqual(
-			capturedRunTaskInput?.browserLaunch.url,
-			"about:blank",
-		);
+		assert.strictEqual(capturedRunTaskInput?.browserLaunch.url, "about:blank");
 	});
 
 	it("passes the configured download dir unchanged for each configured task", async () => {
@@ -354,22 +350,10 @@ describe("index main", () => {
 				capturedRunTaskInputs[0]?.browserLaunch.port,
 				capturedRunTaskInputs[1]?.browserLaunch.port,
 			);
-			assert.isAtLeast(
-				capturedRunTaskInputs[0]?.browserLaunch.port ?? 0,
-				9000,
-			);
-			assert.isAtMost(
-				capturedRunTaskInputs[0]?.browserLaunch.port ?? 0,
-				50000,
-			);
-			assert.isAtLeast(
-				capturedRunTaskInputs[1]?.browserLaunch.port ?? 0,
-				9000,
-			);
-			assert.isAtMost(
-				capturedRunTaskInputs[1]?.browserLaunch.port ?? 0,
-				50000,
-			);
+			assert.isAtLeast(capturedRunTaskInputs[0]?.browserLaunch.port ?? 0, 9000);
+			assert.isAtMost(capturedRunTaskInputs[0]?.browserLaunch.port ?? 0, 50000);
+			assert.isAtLeast(capturedRunTaskInputs[1]?.browserLaunch.port ?? 0, 9000);
+			assert.isAtMost(capturedRunTaskInputs[1]?.browserLaunch.port ?? 0, 50000);
 
 			releaseRuns.forEach((resolve) => resolve());
 			await mainPromise;

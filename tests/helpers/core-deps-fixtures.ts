@@ -43,7 +43,6 @@ export function createMockCoreDeps(
 		agentTakeoverTool: false,
 		dismissCookieBanner: true,
 		preExecutionDomPruning: true,
-		omitExecutorThinkingField: true,
 		websiteAPIficationTools: false,
 		optimizeExecutorStepDelays: false,
 		optimizeTextInput: false,
@@ -138,8 +137,7 @@ export function createMockCoreDeps(
 		waitForAllOpenTabsToSettle: async () => undefined,
 		resolveCurrentTabIndex: async () => 0,
 		getNewlyOpenedTabs: () => [],
-		capturePreStepScreenshotDataUrl: async () =>
-			"data:image/jpeg;base64,AAAA",
+		capturePreStepScreenshotDataUrl: async () => "data:image/jpeg;base64,AAAA",
 		estimateTokenCount: (text) => text.length,
 		formatTabTitle: (tab) => tab.title,
 		createSessionMemoryFile: (port) => {

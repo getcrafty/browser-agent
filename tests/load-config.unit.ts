@@ -85,14 +85,8 @@ tasks:
 
 		const config = loadConfig(configPath);
 
-		assert.equal(
-			config.stageLLMs.createPlan.openrouterProvider,
-			"baseten/fp8",
-		);
-		assert.equal(
-			config.stageLLMs.runAgent.openrouterProvider,
-			"baseten/fp8",
-		);
+		assert.equal(config.stageLLMs.createPlan.openrouterProvider, "baseten/fp8");
+		assert.equal(config.stageLLMs.runAgent.openrouterProvider, "baseten/fp8");
 		assert.equal(
 			config.stageLLMs.verifySuccess.openrouterProvider,
 			"baseten/fp8",
@@ -197,7 +191,6 @@ tasks:
 			agentTakeoverTool: false,
 			dismissCookieBanner: true,
 			preExecutionDomPruning: true,
-			omitExecutorThinkingField: true,
 			websiteAPIficationTools: false,
 			optimizeExecutorStepDelays: false,
 			optimizeTextInput: false,
@@ -262,7 +255,6 @@ tasks:
 			agentTakeoverTool: false,
 			dismissCookieBanner: true,
 			preExecutionDomPruning: true,
-			omitExecutorThinkingField: true,
 			websiteAPIficationTools: false,
 			optimizeExecutorStepDelays: false,
 			optimizeTextInput: false,
@@ -325,10 +317,7 @@ tasks:
   - "test task"
 `);
 
-		assert.include(
-			errorOutput,
-			"'executeLoop' has been renamed to 'runAgent'",
-		);
+		assert.include(errorOutput, "'executeLoop' has been renamed to 'runAgent'");
 	});
 
 	it("rejects missing concurrency", () => {
@@ -666,12 +655,9 @@ tasks:
 		const originalUserTakeover = configFeatureFlags.userTakeoverTool;
 		const originalAuthTakeover = configFeatureFlags.authTakeover;
 		const originalAgentTakeover = configFeatureFlags.agentTakeoverTool;
-		const originalDismissCookieBanner =
-			configFeatureFlags.dismissCookieBanner;
+		const originalDismissCookieBanner = configFeatureFlags.dismissCookieBanner;
 		const originalPreExecutionDomPruning =
 			configFeatureFlags.preExecutionDomPruning;
-		const originalOmitExecutorThinkingField =
-			configFeatureFlags.omitExecutorThinkingField;
 		const originalWebsiteAPIficationTools =
 			configFeatureFlags.websiteAPIficationTools;
 		try {
@@ -702,7 +688,6 @@ feature_flags:
   agent_takeover_tool: true
   dismiss_cookie_banner: false
   pre_execution_dom_pruning: false
-  omit_executor_thinking_field: true
   website_apification_tools: true
   optimize_executor_step_delays: true
   optimize_text_input: true
@@ -720,7 +705,6 @@ tasks:
 				agentTakeoverTool: true,
 				dismissCookieBanner: false,
 				preExecutionDomPruning: false,
-				omitExecutorThinkingField: true,
 				websiteAPIficationTools: true,
 				optimizeExecutorStepDelays: true,
 				optimizeTextInput: true,
@@ -732,7 +716,6 @@ tasks:
 				agentTakeoverTool: originalAgentTakeover,
 				dismissCookieBanner: originalDismissCookieBanner,
 				preExecutionDomPruning: originalPreExecutionDomPruning,
-				omitExecutorThinkingField: originalOmitExecutorThinkingField,
 				websiteAPIficationTools: originalWebsiteAPIficationTools,
 				optimizeExecutorStepDelays: false,
 				optimizeTextInput: false,
@@ -743,12 +726,9 @@ tasks:
 			configFeatureFlags.userTakeoverTool = originalUserTakeover;
 			configFeatureFlags.authTakeover = originalAuthTakeover;
 			configFeatureFlags.agentTakeoverTool = originalAgentTakeover;
-			configFeatureFlags.dismissCookieBanner =
-				originalDismissCookieBanner;
+			configFeatureFlags.dismissCookieBanner = originalDismissCookieBanner;
 			configFeatureFlags.preExecutionDomPruning =
 				originalPreExecutionDomPruning;
-			configFeatureFlags.omitExecutorThinkingField =
-				originalOmitExecutorThinkingField;
 			configFeatureFlags.websiteAPIficationTools =
 				originalWebsiteAPIficationTools;
 		}
@@ -855,11 +835,36 @@ tasks:
 		}
 	});
 
+	it("rejects removed executor thinking-field YAML flags", () => {
+		for (const key of [
+			"omit_executor_thinking_field",
+			"omitExecutorThinkingField",
+		]) {
+			const errorOutput = captureLoadConfigFailure(`
+provider: openai
+model: gpt-5.2
+reasoning_effort: low
+feature_flags:
+  ${key}: false
+concurrency: 1
+tasks:
+  - "test task"
+`);
+
+			assert.include(
+				errorOutput,
+				`feature_flags.${key} has been removed`,
+			);
+			assert.include(
+				errorOutput,
+				"the executor thinking field is always omitted",
+			);
+		}
+	});
+
 	it("parses encrypted auth credentials from YAML config", async () => {
 		await withAuthEncryptionKey(async () => {
-			const encryptedDomainUrl = encryptAuthField(
-				"https://app.example.com",
-			);
+			const encryptedDomainUrl = encryptAuthField("https://app.example.com");
 			const encryptedUsername = encryptAuthField("user@example.com");
 			const encryptedPassword = encryptAuthField("secret-password");
 			const configPath = writeTempConfig(`
@@ -908,14 +913,12 @@ tasks:
 			const firstEncryptedDomainUrl = encryptAuthField(
 				"https://accounts.first.example/login",
 			);
-			const firstEncryptedUsername =
-				encryptAuthField("first@example.com");
+			const firstEncryptedUsername = encryptAuthField("first@example.com");
 			const firstEncryptedPassword = encryptAuthField("first-secret");
 			const secondEncryptedDomainUrl = encryptAuthField(
 				"https://login.second.example/sign-in",
 			);
-			const secondEncryptedUsername =
-				encryptAuthField("second@example.com");
+			const secondEncryptedUsername = encryptAuthField("second@example.com");
 			const secondEncryptedPassword = encryptAuthField("second-secret");
 			const configPath = writeTempConfig(`
 stage_llms:
@@ -1001,10 +1004,7 @@ tasks:
   - "test task"
 `);
 
-		assert.include(
-			errorOutput,
-			'YAML config only supports mode: "encrypted"',
-		);
+		assert.include(errorOutput, 'YAML config only supports mode: "encrypted"');
 	});
 
 	it("parses proxy_host and proxy_port together", () => {
@@ -1149,9 +1149,7 @@ tasks:
 
 		const config = loadConfig(configPath);
 
-		assert.deepEqual(config.tasks, [
-			{ task: "test task", url: "about:blank" },
-		]);
+		assert.deepEqual(config.tasks, [{ task: "test task", url: "about:blank" }]);
 	});
 
 	it("keeps legacy string task entries supported", () => {
@@ -1372,10 +1370,7 @@ tasks:
 
 		const config = loadConfig(configPath);
 
-		assert.strictEqual(
-			config.downloadDir,
-			"/tmp/browser-workspace/downloads",
-		);
+		assert.strictEqual(config.downloadDir, "/tmp/browser-workspace/downloads");
 		assert.strictEqual(config.fileWorkspaceRoot, "/tmp/browser-workspace");
 	});
 
@@ -1609,12 +1604,9 @@ tasks:
 		const originalUserTakeover = configFeatureFlags.userTakeoverTool;
 		const originalAuthTakeover = configFeatureFlags.authTakeover;
 		const originalAgentTakeover = configFeatureFlags.agentTakeoverTool;
-		const originalDismissCookieBanner =
-			configFeatureFlags.dismissCookieBanner;
+		const originalDismissCookieBanner = configFeatureFlags.dismissCookieBanner;
 		const originalPreExecutionDomPruning =
 			configFeatureFlags.preExecutionDomPruning;
-		const originalOmitExecutorThinkingField =
-			configFeatureFlags.omitExecutorThinkingField;
 		const originalExecutorActionContextFields =
 			featureFlags.executorActionContextFields;
 		try {
@@ -1626,7 +1618,6 @@ tasks:
 					agentTakeoverTool: true,
 					dismissCookieBanner: false,
 					preExecutionDomPruning: false,
-					omitExecutorThinkingField: true,
 					websiteAPIficationTools: false,
 					optimizeExecutorStepDelays: false,
 					optimizeTextInput: false,
@@ -1640,7 +1631,6 @@ tasks:
 				agentTakeoverTool: true,
 				dismissCookieBanner: false,
 				preExecutionDomPruning: false,
-				omitExecutorThinkingField: true,
 				websiteAPIficationTools: false,
 				optimizeExecutorStepDelays: false,
 				optimizeTextInput: false,
@@ -1656,12 +1646,9 @@ tasks:
 			configFeatureFlags.userTakeoverTool = originalUserTakeover;
 			configFeatureFlags.authTakeover = originalAuthTakeover;
 			configFeatureFlags.agentTakeoverTool = originalAgentTakeover;
-			configFeatureFlags.dismissCookieBanner =
-				originalDismissCookieBanner;
+			configFeatureFlags.dismissCookieBanner = originalDismissCookieBanner;
 			configFeatureFlags.preExecutionDomPruning =
 				originalPreExecutionDomPruning;
-			configFeatureFlags.omitExecutorThinkingField =
-				originalOmitExecutorThinkingField;
 			featureFlags.executorActionContextFields =
 				originalExecutorActionContextFields;
 		}

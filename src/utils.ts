@@ -139,7 +139,10 @@ const STAGE_OVERRIDE_ROOT_KEYS = [
 	"modelByStage",
 ];
 
-const LEGACY_RUN_AGENT_STAGE_KEYS = ["executeLoop", "execute_loop"] as const;
+const LEGACY_RUN_AGENT_STAGE_KEYS = [
+	"executeLoop",
+	"execute_loop",
+] as const;
 
 const DEFAULT_DATA_EXTRACTION_LLM: LLMOptions = {
 	provider: "openai",
@@ -182,7 +185,10 @@ function parseProviderValue(
 	return normalized;
 }
 
-function resolveConfigRelativePath(value: string, configPath: string): string {
+function resolveConfigRelativePath(
+	value: string,
+	configPath: string,
+): string {
 	return path.isAbsolute(value)
 		? value
 		: path.resolve(path.dirname(configPath), value);
@@ -231,7 +237,11 @@ function parseOptionalPositiveInteger(
 	context: string,
 ): number | undefined {
 	if (value === undefined) return undefined;
-	if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+	if (
+		typeof value !== "number" ||
+		!Number.isInteger(value) ||
+		value <= 0
+	) {
 		failConfig(
 			`Invalid ${context} in config: ${fullPath}. Use a positive integer.`,
 		);
@@ -270,7 +280,10 @@ function parseOptionalOpenRouterProvider(
 	context: string,
 ): string | undefined {
 	return parseOptionalNonEmptyString(
-		pickFirstDefined(source, ["openrouter_provider", "openrouterProvider"]),
+		pickFirstDefined(source, [
+			"openrouter_provider",
+			"openrouterProvider",
+		]),
 		fullPath,
 		`${context} openrouter_provider`,
 	);
@@ -364,7 +377,12 @@ function parseEncryptedAuthCredentialEntry(
 			`Invalid auth_credentials.mode in config: ${fullPath}. YAML config only supports mode: "encrypted".`,
 		);
 	}
-	const plaintextKeys = ["domain_url", "domainUrl", "username", "password"];
+	const plaintextKeys = [
+		"domain_url",
+		"domainUrl",
+		"username",
+		"password",
+	];
 	for (const key of plaintextKeys) {
 		if (authSource[key] !== undefined) {
 			failConfig(
@@ -490,7 +508,10 @@ function parseStageLLMOverride(
 	topLevelSource: Record<string, unknown>,
 	fullPath: string,
 ): StageLLMOverride | undefined {
-	let stageValue = pickFirstDefined(stageOverridesSource, STAGE_KEYS[stage]);
+	let stageValue = pickFirstDefined(
+		stageOverridesSource,
+		STAGE_KEYS[stage],
+	);
 	if (stageValue === undefined) {
 		stageValue = pickFirstDefined(topLevelSource, STAGE_KEYS[stage]);
 	}
@@ -655,7 +676,9 @@ function resolveStageLLMOptions(
 	}
 	const openrouterProvider =
 		override?.openrouterProvider ??
-		(provider === "openrouter" ? defaultLLM?.openrouterProvider : undefined);
+		(provider === "openrouter"
+			? defaultLLM?.openrouterProvider
+			: undefined);
 	if (openrouterProvider !== undefined && provider !== "openrouter") {
 		failConfig(
 			`Invalid openrouter_provider for stage '${stage}' in config: ${fullPath}. openrouter_provider can only be used with provider 'openrouter'.`,
@@ -668,8 +691,7 @@ function resolveStageLLMOptions(
 		reasoningEffort,
 		...((override?.maxModelLen ?? defaultLLM?.maxModelLen) !== undefined
 			? {
-					maxModelLen:
-						override?.maxModelLen ?? defaultLLM?.maxModelLen,
+					maxModelLen: override?.maxModelLen ?? defaultLLM?.maxModelLen,
 				}
 			: {}),
 		...((override?.reserveOutputTokens ??
@@ -775,7 +797,9 @@ export function loadConfig(configPath: string): Config {
 	const content = fs.readFileSync(fullPath, "utf-8");
 	const parsed = yaml.load(content);
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-		failConfig(`Invalid config file: ${fullPath}. Expected a YAML object.`);
+		failConfig(
+			`Invalid config file: ${fullPath}. Expected a YAML object.`,
+		);
 	}
 	const raw = parsed as Record<string, unknown>;
 
@@ -831,7 +855,10 @@ export function loadConfig(configPath: string): Config {
 				`Invalid default model in config: ${fullPath}. Use a non-empty string.`,
 			);
 		}
-		if (defaultOpenRouterProvider !== undefined && provider !== "openrouter") {
+		if (
+			defaultOpenRouterProvider !== undefined &&
+			provider !== "openrouter"
+		) {
 			failConfig(
 				`Invalid default openrouter_provider in config: ${fullPath}. openrouter_provider can only be used with provider 'openrouter'.`,
 			);
@@ -886,7 +913,10 @@ export function loadConfig(configPath: string): Config {
 		};
 	}
 
-	const stageOverridesInput = pickFirstDefined(raw, STAGE_OVERRIDE_ROOT_KEYS);
+	const stageOverridesInput = pickFirstDefined(
+		raw,
+		STAGE_OVERRIDE_ROOT_KEYS,
+	);
 	const stageOverridesSource =
 		stageOverridesInput === undefined
 			? {}
@@ -942,8 +972,7 @@ export function loadConfig(configPath: string): Config {
 			{
 				...DEFAULT_DATA_EXTRACTION_LLM,
 				...((defaultLLM?.provider === undefined ||
-					defaultLLM.provider ===
-						DEFAULT_DATA_EXTRACTION_LLM.provider) &&
+					defaultLLM.provider === DEFAULT_DATA_EXTRACTION_LLM.provider) &&
 				defaultLLM?.reasoningEffort !== undefined
 					? { reasoningEffort: defaultLLM.reasoningEffort }
 					: {}),
@@ -969,6 +998,15 @@ export function loadConfig(configPath: string): Config {
 		if (featureFlagsSource[removedKey] === undefined) continue;
 		failConfig(
 			`feature_flags.${removedKey} has been removed; bids must come from the current HTML context.`,
+		);
+	}
+	for (const removedKey of [
+		"omit_executor_thinking_field",
+		"omitExecutorThinkingField",
+	]) {
+		if (featureFlagsSource[removedKey] === undefined) continue;
+		failConfig(
+			`feature_flags.${removedKey} has been removed; the executor thinking field is always omitted.`,
 		);
 	}
 	for (const legacyKey of [
@@ -1054,15 +1092,6 @@ export function loadConfig(configPath: string): Config {
 				]),
 				fullPath,
 				"feature_flags.pre_execution_dom_pruning",
-			) ?? true,
-		omitExecutorThinkingField:
-			parseBooleanConfigValue(
-				pickFirstDefined(featureFlagsSource, [
-					"omit_executor_thinking_field",
-					"omitExecutorThinkingField",
-				]),
-				fullPath,
-				"feature_flags.omit_executor_thinking_field",
 			) ?? true,
 		websiteAPIficationTools:
 			parseBooleanConfigValue(
@@ -1288,7 +1317,8 @@ export function loadConfig(configPath: string): Config {
 	}
 	if (
 		executablePathInput !== undefined &&
-		(typeof executablePathInput !== "string" || !executablePathInput.trim())
+		(typeof executablePathInput !== "string" ||
+			!executablePathInput.trim())
 	) {
 		failConfig(
 			`Invalid executable_path value in config: ${fullPath}. Use a non-empty Chrome executable path string.`,
@@ -1312,8 +1342,14 @@ export function loadConfig(configPath: string): Config {
 	const normalizedFileWorkspaceRoot =
 		explicitFileWorkspaceRoot ?? normalizedDownloadDir;
 
-	const proxyHostInput = pickFirstDefined(raw, ["proxy_host", "proxyHost"]);
-	const proxyPortInput = pickFirstDefined(raw, ["proxy_port", "proxyPort"]);
+	const proxyHostInput = pickFirstDefined(raw, [
+		"proxy_host",
+		"proxyHost",
+	]);
+	const proxyPortInput = pickFirstDefined(raw, [
+		"proxy_port",
+		"proxyPort",
+	]);
 	const hasProxyHost = proxyHostInput !== undefined;
 	const hasProxyPort = proxyPortInput !== undefined;
 	if (hasProxyHost !== hasProxyPort) {
@@ -1419,8 +1455,7 @@ export function loadConfig(configPath: string): Config {
 		taskRuns: (taskRunsInput as number | undefined) ?? 1,
 		taskRunRetryCount: (taskRunRetryCountInput as number | undefined) ?? 0,
 		taskUntilSuccessMaxAttempts: taskUntilSuccessMaxAttemptsInput as
-			| number
-			| undefined,
+			number | undefined,
 		tasks,
 		concurrency: concurrencyInput,
 		saveStepsContext:
@@ -1664,8 +1699,7 @@ export function reportExecution(
 				extraction.usage.cached_input_tokens ?? 0;
 			const { reasoning: extractionReasoning, output: extractionOutput } =
 				getRecapOutputUsage(extraction.usage);
-			const extractionLlmTimeMs =
-				extraction.usage.generation_time_ms ?? 0;
+			const extractionLlmTimeMs = extraction.usage.generation_time_ms ?? 0;
 			console.log(
 				`${extractionLabel.padEnd(recapLabelWidth)} | ${formatTokenCount(extraction.usage.input_tokens)} | ${formatTokenCount(extractionCachedInput)} | ${typeof extractionReasoning === "number" ? formatTokenCount(extractionReasoning) : "—".padStart(9)} | ${typeof extractionOutput === "number" ? formatTokenCount(extractionOutput) : "—".padStart(9)} | ${formatTokenCount(extraction.usage.total_tokens)} | ${(extractionLlmTimeMs / 1000).toFixed(2).padStart(12)} | ${"—".padStart(13)}`,
 			);
