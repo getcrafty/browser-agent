@@ -100,50 +100,39 @@ run(process.execPath, [
 ]);
 
 const uv = process.platform === "win32" ? "uv.exe" : "uv";
-for (const target of SDK_PLATFORMS) {
-	run(
-		uv,
-		[
-			"build",
-			"--wheel",
-			"--out-dir",
-			pythonOutput,
-			path.join(root, "sdk", "python-sdk"),
-		],
-		{
-			env: {
-				...process.env,
-				BROWSER_AGENT_CLI_ASSET_DIR: assets,
-				BROWSER_AGENT_CLI_MANIFEST: manifestPath,
-				BROWSER_AGENT_SDK_PLATFORM: target.key,
-				BROWSER_AGENT_WHEEL_PLATFORM_TAG: target.wheelTag,
-			},
+run(
+	uv,
+	[
+		"build",
+		"--wheel",
+		"--out-dir",
+		pythonOutput,
+		path.join(root, "sdk", "python-sdk"),
+	],
+	{
+		env: {
+			...process.env,
+			BROWSER_AGENT_CLI_MANIFEST: manifestPath,
 		},
-	);
-}
+	},
+);
 const wheels = fs
 	.readdirSync(pythonOutput)
 	.filter((name) => name.endsWith(".whl"));
-assert.equal(wheels.length, SDK_PLATFORMS.length);
+assert.equal(wheels.length, 1);
+assert(
+	wheels[0].endsWith("-py3-none-any.whl"),
+	`Expected a universal Python wheel, found ${wheels[0]}`,
+);
 const pypiFileSizeLimit = 100 * 1024 * 1024;
-for (const wheel of wheels) {
-	assert(
-		fs.statSync(path.join(pythonOutput, wheel)).size <= pypiFileSizeLimit,
-		`${wheel} exceeds PyPI's 100 MiB file-size limit`,
-	);
-}
-for (const target of SDK_PLATFORMS) {
-	const wheel = wheels.find((name) =>
-		name.endsWith(`-${target.wheelTag}.whl`),
-	);
-	assert(wheel, `Missing Python wheel for ${target.key}`);
-	run(process.platform === "win32" ? "python.exe" : "python3", [
-		path.join(root, "scripts", "verify-python-wheel.py"),
-		path.join(pythonOutput, wheel),
-		target.key,
-		path.join(assets, target.asset),
-		manifestPath,
-	]);
-}
+assert(
+	fs.statSync(path.join(pythonOutput, wheels[0])).size <= pypiFileSizeLimit,
+	`${wheels[0]} exceeds PyPI's 100 MiB file-size limit`,
+);
+run(process.platform === "win32" ? "python.exe" : "python3", [
+	path.join(root, "scripts", "verify-python-wheel.py"),
+	path.join(pythonOutput, wheels[0]),
+	manifestPath,
+]);
 
 console.log(`SDK artifacts built and verified for ${rootPackage.version}.`);

@@ -14,6 +14,12 @@ pip install browser-agent-python-sdk
 The distribution is named `browser-agent-python-sdk`; import it as
 `browser_agent`.
 
+The SDK downloads the matching Browser Agent CLI from its GitHub Release on
+first use, verifies its SHA-256 checksum, and reuses it from the user cache.
+Set `BROWSER_AGENT_CLI_PATH` to a preinstalled CLI executable for offline
+environments, or `BROWSER_AGENT_CLI_CACHE_DIR` to choose the managed cache
+location.
+
 ```python
 from browser_agent import BrowserAgent, BrowserAgentTask
 

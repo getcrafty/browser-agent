@@ -31,7 +31,7 @@ Supported providers include OpenAI, Anthropic, Google, Together, and vLLM-compat
 
 ## SDKs
 
-Browser Agent provides TypeScript and Python SDKs for running browser automation tasks. Both SDKs start the bundled executable, stream progress events, and return a final result.
+Browser Agent provides TypeScript and Python SDKs for running browser automation tasks. Both SDKs install the matching CLI from the GitHub Release, verify its checksum, stream progress events, and return a final result.
 
 Set `OPENAI_API_KEY` or pass the API key directly when creating the agent.
 

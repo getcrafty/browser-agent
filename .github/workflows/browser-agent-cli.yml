@@ -512,27 +512,21 @@ jobs:
                     - platform: linux-arm64
                       runner: ubuntu-22.04-arm
                       executable_suffix: ""
-                      wheel_tag: manylinux_2_35_aarch64
                     - platform: linux-x64
                       runner: ubuntu-22.04
                       executable_suffix: ""
-                      wheel_tag: manylinux_2_35_x86_64
                     - platform: win32-arm64
                       runner: windows-11-arm
                       executable_suffix: .exe
-                      wheel_tag: win_arm64
                     - platform: win32-x64
                       runner: windows-2025
                       executable_suffix: .exe
-                      wheel_tag: win_amd64
                     - platform: darwin-arm64
                       runner: macos-15
                       executable_suffix: ""
-                      wheel_tag: macosx_13_0_arm64
                     - platform: darwin-x64
                       runner: macos-15-intel
                       executable_suffix: ""
-                      wheel_tag: macosx_13_0_x86_64
         steps:
             - name: Setup Node
               uses: actions/setup-node@v4
@@ -597,13 +591,11 @@ jobs:
                   NODE
 
             - name: Install and test Python SDK
-              env:
-                  WHEEL_TAG: ${{ matrix.wheel_tag }}
               run: |
                   set -euo pipefail
-                  wheels=("$GITHUB_WORKSPACE"/dist/pypi/*-"$WHEEL_TAG".whl)
+                  wheels=("$GITHUB_WORKSPACE"/dist/pypi/*-py3-none-any.whl)
                   if [[ "${#wheels[@]}" != "1" || ! -f "${wheels[0]}" ]]; then
-                    echo "::error::Expected one Python wheel for $WHEEL_TAG."
+                    echo "::error::Expected one universal Python wheel."
                     exit 1
                   fi
                   python -m pip install --no-index "${wheels[0]}"

@@ -5,7 +5,6 @@ export const SDK_PLATFORMS = [
 		nodeArchitecture: "arm64",
 		asset: "browser-agent-macos-arm64",
 		archive: "browser-agent-macos-arm64.tar.gz",
-		wheelTag: "macosx_13_0_arm64",
 	},
 	{
 		key: "darwin-x64",
@@ -13,7 +12,6 @@ export const SDK_PLATFORMS = [
 		nodeArchitecture: "x64",
 		asset: "browser-agent-macos-x64",
 		archive: "browser-agent-macos-x64.tar.gz",
-		wheelTag: "macosx_13_0_x86_64",
 	},
 	{
 		key: "linux-arm64",
@@ -21,7 +19,6 @@ export const SDK_PLATFORMS = [
 		nodeArchitecture: "arm64",
 		asset: "browser-agent-linux-arm64",
 		archive: "browser-agent-linux-arm64.tar.gz",
-		wheelTag: "manylinux_2_35_aarch64",
 	},
 	{
 		key: "linux-x64",
@@ -29,7 +26,6 @@ export const SDK_PLATFORMS = [
 		nodeArchitecture: "x64",
 		asset: "browser-agent-linux-x64",
 		archive: "browser-agent-linux-x64.tar.gz",
-		wheelTag: "manylinux_2_35_x86_64",
 	},
 	{
 		key: "win32-arm64",
@@ -37,7 +33,6 @@ export const SDK_PLATFORMS = [
 		nodeArchitecture: "arm64",
 		asset: "browser-agent-windows-arm64.exe",
 		archive: "browser-agent-windows-arm64.zip",
-		wheelTag: "win_arm64",
 	},
 	{
 		key: "win32-x64",
@@ -45,7 +40,6 @@ export const SDK_PLATFORMS = [
 		nodeArchitecture: "x64",
 		asset: "browser-agent-windows-x64.exe",
 		archive: "browser-agent-windows-x64.zip",
-		wheelTag: "win_amd64",
 	},
 ];
 

@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
 from browser_agent import BrowserAgentTask
 from browser_agent.runtime import (
-    bundled_executable,
-    bundled_manifest,
+    cached_executable,
+    cli_manifest,
     create_runtime_files,
     platform_key,
     resolve_executable,
-    verify_bundled_checksum,
     verify_executable,
 )
 from tests.helpers import FAKE_EXECUTABLE, fake_environment
@@ -99,21 +100,23 @@ class ConfigTests(unittest.TestCase):
             ("other", "custom", "other-custom"),
         ]:
             self.assertEqual(platform_key(system, machine), expected)
-        self.assertTrue(str(bundled_executable("win32", "amd64")).endswith(".exe"))
+        self.assertTrue(
+            str(cached_executable("1.2.3", "win32", "amd64", Path("/cache")))
+            .endswith("1.2.3/win32-x64/browser-agent.exe")
+        )
 
 
 class ExecutableTests(unittest.IsolatedAsyncioTestCase):
     async def test_resolves_and_verifies_executable_outcomes(self) -> None:
-        expected = (
-            Path(__file__).parents[1] / "src" / "browser_agent" / "bin"
-            / platform_key() / "browser-agent"
-        )
-        self.assertEqual(bundled_executable(), expected)
-        self.assertTrue(str(bundled_manifest()).endswith("cli-manifest.json"))
+        self.assertTrue(str(cli_manifest()).endswith("cli-manifest.json"))
         self.assertEqual(
             await resolve_executable(Path(FAKE_EXECUTABLE)),
             FAKE_EXECUTABLE,
         )
+        with fake_environment(
+            "success", BROWSER_AGENT_CLI_PATH=FAKE_EXECUTABLE
+        ):
+            self.assertEqual(await resolve_executable(), FAKE_EXECUTABLE)
         with self.assertRaisesRegex(Exception, "unavailable"):
             await resolve_executable(Path("/definitely/missing"))
         with fake_environment("success"):
@@ -135,26 +138,86 @@ class ExecutableTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(Exception, "timed out"):
                 await verify_executable(str(sleeper), 0.005)
 
-    def test_verifies_bundled_checksum(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="py-checksum-") as directory:
+    async def test_downloads_verifies_caches_and_reuses_executable(self) -> None:
+        payload = b"#!/bin/sh\nexit 0\n"
+        checksum = hashlib.sha256(payload).hexdigest()
+        with tempfile.TemporaryDirectory(prefix="py-cli-download-") as directory:
             root = Path(directory)
-            executable = root / "browser-agent"
-            executable.write_bytes(b"binary")
-            digest = hashlib.sha256(b"binary").hexdigest()
             manifest = root / "cli-manifest.json"
             manifest.write_text(
                 json.dumps(
                     {
+                        "version": "1.2.3",
                         "platforms": {
                             "linux-x64": {
-                                "sha256": digest,
+                                "url": "https://github.com/getcrafty/browser-agent/releases/download/test/browser-agent-linux-x64",
+                                "sha256": checksum,
                             }
-                        }
+                        },
                     }
                 ),
                 encoding="utf-8",
             )
-            verify_bundled_checksum(executable, "linux-x64", manifest)
-            executable.write_bytes(b"changed")
-            with self.assertRaisesRegex(Exception, "verification failed"):
-                verify_bundled_checksum(executable, "linux-x64", manifest)
+            cache = root / "cache"
+            with patch(
+                "browser_agent.runtime.urllib.request.urlopen",
+                return_value=io.BytesIO(payload),
+            ) as download:
+                executable = await resolve_executable(
+                    manifest=manifest,
+                    cache_directory=cache,
+                    system="linux",
+                    machine="x86_64",
+                )
+                reused = await resolve_executable(
+                    manifest=manifest,
+                    cache_directory=cache,
+                    system="linux",
+                    machine="x86_64",
+                )
+            self.assertEqual(executable, reused)
+            self.assertEqual(Path(executable).read_bytes(), payload)
+            self.assertNotEqual(os.stat(executable).st_mode & 0o111, 0)
+            download.assert_called_once()
+
+    async def test_rejects_download_and_manifest_failures(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="py-cli-failure-") as directory:
+            root = Path(directory)
+            manifest = root / "cli-manifest.json"
+            target = {
+                "url": "https://github.com/getcrafty/browser-agent/releases/download/test/browser-agent-linux-x64",
+                "sha256": "0" * 64,
+            }
+            manifest.write_text(
+                json.dumps(
+                    {"version": "1.2.3", "platforms": {"linux-x64": target}}
+                ),
+                encoding="utf-8",
+            )
+            with patch(
+                "browser_agent.runtime.urllib.request.urlopen",
+                return_value=io.BytesIO(b"wrong"),
+            ), self.assertRaisesRegex(Exception, "checksum verification failed"):
+                await resolve_executable(
+                    manifest=manifest,
+                    cache_directory=root / "checksum-cache",
+                    system="linux",
+                    machine="x86_64",
+                )
+            with patch(
+                "browser_agent.runtime.urllib.request.urlopen",
+                side_effect=urllib.error.URLError("offline"),
+            ), self.assertRaisesRegex(Exception, "Unable to download"):
+                await resolve_executable(
+                    manifest=manifest,
+                    cache_directory=root / "offline-cache",
+                    system="linux",
+                    machine="x86_64",
+                )
+            with self.assertRaisesRegex(Exception, "metadata is unavailable"):
+                await resolve_executable(
+                    manifest=manifest,
+                    cache_directory=root / "unsupported-cache",
+                    system="darwin",
+                    machine="arm64",
+                )
