@@ -146,6 +146,15 @@ async function runJsScrollAttempt(
           target.scrollLeft = left + deltaX;
           target.scrollTop = top + deltaY;
         }
+
+        for (const [el, [beforeLeft, beforeTop]] of before.entries()) {
+          if (el.scrollLeft !== beforeLeft || el.scrollTop !== beforeTop) {
+            return self && el === self ? "target" : "container";
+          }
+        }
+        if (window.scrollX !== beforeWindowX || window.scrollY !== beforeWindowY) {
+          return "container";
+        }
       }
 
       if (targets.length === 0 || !targets.some((el) => canScroll(el))) {
@@ -201,6 +210,8 @@ export async function scroll(
 			if (!preferContainer) {
 				try {
 					await tryCdpWheelAtElementCenter(b, nodeId, deltaX, deltaY);
+					// CDP wheel scrolling is applied asynchronously on some pages.
+					await sleep(50);
 				} catch {
 					// Fall through to JS fallback.
 				}

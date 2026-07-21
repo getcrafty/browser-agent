@@ -131,6 +131,15 @@ export function shouldUseExecutorReasoningTraceContext(
 	);
 }
 
+export function shouldIncludeExecutorReasoningHistory(
+	options: ExecutorPromptOptions = {},
+): boolean {
+	return (
+		featureFlags.incrementalDomContext ||
+		shouldUseExecutorReasoningTraceContext(options)
+	);
+}
+
 export function shouldEmitExecutorActionContextFields(
 	options: ExecutorPromptOptions = {},
 ): boolean {
@@ -240,11 +249,21 @@ unprune:
 }
 
 function getIncrementalDomContextPayloadDescription(): string {
-	return "- html: simplified DOM of the current page (always full DOM for the current step)";
+	if (!featureFlags.incrementalDomContext) {
+		return "- html: simplified DOM of the current page (always full DOM for the current step)";
+	}
+	return `- htmlContextMode: "full" or "diff"
+- html: when htmlContextMode is "full", a complete simplified DOM snapshot; when htmlContextMode is "diff", a unified line diff from the immediately preceding DOM snapshot. An empty diff means the DOM is unchanged.`;
 }
 
 function getIncrementalDomContextInstructions(): string {
-	return "";
+	if (!featureFlags.incrementalDomContext) {
+		return "";
+	}
+	return `- Reconstruct the current DOM chronologically from the most recent user payload whose htmlContextMode is "full", then apply each later "diff" payload in order.
+- Unified diff lines beginning with "-" were removed, lines beginning with "+" were added, and unprefixed/context lines are unchanged.
+- A later "full" payload replaces the earlier DOM baseline completely. Do not combine DOM content from before that full snapshot with the new baseline.
+- An empty html value with htmlContextMode "diff" means the DOM is unchanged from the immediately preceding step.`;
 }
 
 function getExecutorReasoningPreamble(
@@ -363,12 +382,18 @@ ${getPreStepScreenshotPayloadDescription()}
 - memoryContent: optional combined memory context. When present, it may include runtime-pinned workspace/file context, mutable browser scratchpad, and extracted page data/result memory sections. It appears after a memory_read tool call or during forced final reporting.`;
 }
 
-const EXECUTOR_SECTION_HTML_FORMAT = `### HTML Format
+function getExecutorSectionHtmlFormat(): string {
+	const offscreenDomGuidance = featureFlags.hideOffscreenDomContent
+		? `
+Nodes marked content-hidden-outside-viewport represent omitted DOM subtrees beyond the viewport overscan. To reveal one, use only the scroll tool with its bid and the exact signed scroll-delta-y value; do not click, type into, or otherwise interact with the placeholder.`
+		: "";
+	return `### HTML Format
 ${DOM_FORMAT_DESCRIPTION}
 ${DOM_BID_NOTE}
 Nodes with couldBeHidden are uncertain-visibility nodes: they may be hidden, but this is not confirmed. Prefer fully visible alternatives when possible.
 Nodes marked no-click-allowed have cursor not-allowed or no-drop: they remain targetable for reference, but clicks may not register; prefer another control when you need a reliable click.
-Nodes marked scroll-enabled have CSS overflow that allows scrolling; nodes marked scrollable currently overflow their client bounds and can be scrolled.`;
+Nodes marked scroll-enabled have CSS overflow that allows scrolling; nodes marked scrollable currently overflow their client bounds and can be scrolled.${offscreenDomGuidance}`;
+}
 
 function getExecutorSectionResponseFormat(
 	options: ExecutorPromptOptions = {},
@@ -678,7 +703,7 @@ function getExecutorSectionMisc(options: ExecutorPromptOptions = {}): string {
 `
 		: "";
 	const reasoningTraceContextInstruction =
-		shouldUseExecutorReasoningTraceContext(options)
+		shouldIncludeExecutorReasoningHistory(options)
 			? `- Prior assistant messages may include <think>...</think> blocks containing fallible reasoning from earlier executor steps. Use them only for continuity; the current payload and browser state remain the source of truth, and you must not copy those blocks into your YAML response.
 `
 			: "";
@@ -717,7 +742,7 @@ function getExecutorPromptBlock(
 		case "payloadFormat":
 			return getExecutorSectionPayloadFormat(options);
 		case "htmlFormat":
-			return EXECUTOR_SECTION_HTML_FORMAT;
+			return getExecutorSectionHtmlFormat();
 		case "responseFormat":
 			return getExecutorSectionResponseFormat(options);
 		case "actions":

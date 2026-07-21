@@ -49,6 +49,47 @@ describe("history prompt safety", () => {
 		);
 	});
 
+	it("retains incremental HTML while stripping sensitive fields", () => {
+		const originalIncrementalDomContext =
+			featureFlags.incrementalDomContext;
+		featureFlags.incrementalDomContext = true;
+		try {
+			const stepsHistory = [
+				{
+					payload: {
+						currentURL: "https://example.com/old",
+						htmlContextMode: "full",
+						html: "old anchor",
+					},
+					assistant: {},
+				},
+			];
+			const stripped = stripPayloadForHistory({
+				payload: {
+					task: "task",
+					currentURL: "https://example.com/new",
+					htmlContextMode: "diff",
+					html: "@@ diff",
+					memoryContent: "private memory",
+					authContext: { usernameOrEmail: "private@example.com" },
+				},
+				keepPlanInHistory: false,
+				incrementalDomContextEnabled: true,
+				htmlContextMode: "diff",
+				stepsHistory,
+			});
+
+			assert.deepEqual(stripped, {
+				currentURL: "https://example.com/new",
+				htmlContextMode: "diff",
+				html: "@@ diff",
+			});
+			assert.strictEqual(stepsHistory[0].payload.html, "old anchor");
+		} finally {
+			featureFlags.incrementalDomContext = originalIncrementalDomContext;
+		}
+	});
+
 	it("canonicalizes history assistant messages for strings, arbitrary objects, and step-like records", () => {
 		const originalOmitThinking =
 			configFeatureFlags.omitExecutorThinkingField;
@@ -287,15 +328,18 @@ describe("history prompt safety", () => {
 		}
 	});
 
-	it("injects reasoning traces only for eligible non-OpenAI executor history", () => {
+	it("injects reasoning traces for eligible providers or incremental context", () => {
 		const originalOmitThinking =
 			configFeatureFlags.omitExecutorThinkingField;
 		const originalActionContext = featureFlags.executorActionContextFields;
 		const originalReasoningTraceContext =
 			featureFlags.executorReasoningTraceContext;
+		const originalIncrementalDomContext =
+			featureFlags.incrementalDomContext;
 		setConfigFeatureFlags({ omitExecutorThinkingField: true });
 		featureFlags.executorActionContextFields = true;
 		featureFlags.executorReasoningTraceContext = true;
+		featureFlags.incrementalDomContext = false;
 		const stepsHistory = [
 			{
 				payload: { currentURL: "https://example.com/results" },
@@ -346,6 +390,25 @@ describe("history prompt safety", () => {
 			assert.include(openAIContent, "nextActionRationale:");
 			assert.notInclude(openAIContent, "done:");
 			assert.notInclude(openAIContent, "result:");
+
+			featureFlags.incrementalDomContext = true;
+			const incrementalOpenAI = buildHistoryMessagesFromFullStepHistory(
+				stepsHistory,
+				{
+					provider: "openai",
+				},
+			);
+			const incrementalOpenAIContent = String(
+				incrementalOpenAI[1].content,
+			);
+			assert.include(
+				incrementalOpenAIContent,
+				"<think>\nInspect page:\nstatus: ready\n</think>",
+			);
+			assert.include(
+				incrementalOpenAIContent,
+				"previousStepStatus: progressed",
+			);
 		} finally {
 			setConfigFeatureFlags({
 				omitExecutorThinkingField: originalOmitThinking,
@@ -353,6 +416,7 @@ describe("history prompt safety", () => {
 			featureFlags.executorActionContextFields = originalActionContext;
 			featureFlags.executorReasoningTraceContext =
 				originalReasoningTraceContext;
+			featureFlags.incrementalDomContext = originalIncrementalDomContext;
 		}
 	});
 });

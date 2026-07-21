@@ -6,7 +6,7 @@ couldBeHidden
           bid="3nb" button: "Main menu"
           hidden:
             button: "Go back, Close"
-            bid="3nd,3nc" href="/" presentation: "Google"
+            bid="3nd,3nc" presentation: "Google"
             heading
         bid="5ev":
           div:
@@ -21,8 +21,8 @@ couldBeHidden
           span:
             button bid="3nl": "Change appearance"
         bid="5ez,5ey":
-          bid="5ex,3os,5ew,3nm" href="https://www.google.lu/intl/en/about/products" button: "Google apps"
-          bid="3no,3nn" href: "Sign in Sign in"
+          bid="5ex,3os,5ew,3nm" button: "Google apps"
+          bid="3no,3nn": "Sign in Sign in"
 c-wiz scroll-enabled:
   div:
   div:
@@ -1656,16 +1656,16 @@ c-wiz scroll-enabled:
           "Currency"
             "USD"
       div:
-        bid="5em" href="https://about.google/?hl=en-US": "About Google Travel"
-        bid="5en" href="https://policies.google.com/privacy?hl=en-US": "Privacy"
-        bid="5eo" href="https://policies.google.com/terms?hl=en-US": "Terms"
-        bid="5ep" href: "Join user studies"
+        bid="5em": "About Google Travel"
+        bid="5en": "Privacy"
+        bid="5eo": "Terms"
+        bid="5ep": "Join user studies"
         bid="5eq" button: "Report Illegal Content"
-        bid="5er" href="./#0": "Feedback"
-        bid="5es" href="https://support.google.com/travel/?hl=en-US#topic=2475360": "Help Center and Consumer Information"
+        bid="5er": "Feedback"
+        bid="5es": "Help Center and Consumer Information"
       div:
         p: "Displayed currencies may differ from the currencies used to purchase flights."
-          bid="5et" href="https://www.google.com/googlefinance/disclaimer?hl=en-US&gl=LU": "Learn more about currencies"
+          bid="5et": "Learn more about currencies"
         p: "Prices are final prices and include all taxes and fees, including payment fees\n                          for the cheapest common payment method (which may differ depending on the provider).\n                          Additional charges may apply for other types of payment, luggage, meals, WLAN or other\n                          additional services. Prices, availability and travel details are provided based on the latest\n                          information received from our partners. This information is reflected in the results within a\n                          period of less than 24 hours. Additional conditions may also be applied by our partners. You\n                          should then check prices and conditions with the services providers before booking."
 "Main menu"
 "Google apps"

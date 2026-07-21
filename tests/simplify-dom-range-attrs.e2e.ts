@@ -1,6 +1,11 @@
 import { assert } from "chai";
 import { describe, it } from "mocha";
-import { close, getSimplifiedDOM, launch, navigate } from "../src/browser/index.js";
+import {
+	close,
+	getSimplifiedDOM,
+	launch,
+	navigate,
+} from "../src/browser/index.js";
 import type { Browser } from "../src/browser/types.js";
 
 describe("simplify-dom range attributes", function () {
@@ -20,24 +25,24 @@ describe("simplify-dom range attributes", function () {
 			assert.match(
 				simplified,
 				/type="range"/,
-				'simplified DOM should include range input type attribute',
+				"simplified DOM should include range input type attribute",
 			);
 			assert.match(
 				simplified,
 				/min="0"/,
-				'simplified DOM should include min attribute for range input',
+				"simplified DOM should include min attribute for range input",
 			);
 			assert.match(
 				simplified,
 				/max="100"/,
-				'simplified DOM should include max attribute for range input',
+				"simplified DOM should include max attribute for range input",
 			);
 		} finally {
 			if (browser) await close(browser);
 		}
 	});
 
-	it("normalizes javascript void href values to empty href", async () => {
+	it("removes all href forms while preserving anchor text", async () => {
 		let browser: Browser | null = null;
 		try {
 			browser = await launch(undefined, true);
@@ -50,19 +55,12 @@ describe("simplify-dom range attributes", function () {
 
 			assert.notMatch(
 				simplified,
-				/href="javascript\s*:\s*void\(0\)"/i,
-				'simplified DOM should not keep javascript:void(0) href values',
+				/\bhref(?:=|\b)/i,
+				"simplified DOM should not include href attributes",
 			);
-			assert.match(
-				simplified,
-				/href=""/,
-				'simplified DOM should keep normalized empty href values as href=""',
-			);
-			assert.match(
-				simplified,
-				/href="\/keep"/,
-				'simplified DOM should keep non-javascript href values intact',
-			);
+			assert.include(simplified, "A1");
+			assert.include(simplified, "A2");
+			assert.include(simplified, "A3");
 		} finally {
 			if (browser) await close(browser);
 		}
@@ -81,7 +79,7 @@ describe("simplify-dom range attributes", function () {
 			assert.notMatch(
 				simplified,
 				/aria-labelledby=/i,
-				'simplified DOM should not include aria-labelledby attributes',
+				"simplified DOM should not include aria-labelledby attributes",
 			);
 		} finally {
 			if (browser) await close(browser);

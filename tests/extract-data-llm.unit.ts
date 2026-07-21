@@ -3,8 +3,10 @@ import { afterEach, describe, it } from "mocha";
 import { extractDataResultsFromSnapshot } from "../src/agents/data-extraction.js";
 import { __setProviderOverrideForTests } from "../src/agents/providers/ai-sdk.js";
 import type { StageModelInvocationTrace } from "../src/agents/types.js";
+import { featureFlags } from "../src/featureFlags.js";
 
 const LLM_OPTIONS = { provider: "openai", model: "gpt-test" } as const;
+const originalDisableHref = featureFlags.disableHref;
 
 describe("extractDataResultsFromSnapshot", () => {
 	async function expectRejection(
@@ -32,9 +34,10 @@ describe("extractDataResultsFromSnapshot", () => {
 
 	afterEach(() => {
 		__setProviderOverrideForTests("openai", null);
+		featureFlags.disableHref = originalDisableHref;
 	});
 
-	it("annotates direct hrefs in DOM order and resolves selected IDs", async () => {
+	it("replaces hrefs with link IDs and resolves selected IDs", async () => {
 		const traces: StageModelInvocationTrace[] = [];
 		let prompt = "";
 		let calls = 0;
@@ -82,22 +85,48 @@ describe("extractDataResultsFromSnapshot", () => {
 		]);
 		assert.include(prompt, "Extract product names and prices");
 		assert.include(prompt, "https://example.com/search?q=laptop");
+		assert.include(prompt, 'article link_id="link_1": First product $12');
+		assert.include(prompt, '  a link_id="link_2": Second product $15');
 		assert.include(
 			prompt,
-			'article href="/one" link_id="link_1": First product $12',
+			'article link_id="link_3": First product duplicate',
 		);
-		assert.include(
-			prompt,
-			'  a href="/two" link_id="link_2": Second product $15',
-		);
-		assert.include(
-			prompt,
-			'article href="/one" link_id="link_3": First product duplicate',
-		);
+		assert.notInclude(prompt, "href=");
+		assert.notInclude(prompt, "/one");
+		assert.notInclude(prompt, "/two");
 		assert.include(prompt, "link_current");
 		assert.include(prompt, "link_id: <quoted link_id>");
 		assert.strictEqual(traces[0]?.stage, "dataExtraction");
 		assert.deepStrictEqual(traces[0]?.meta, { root: "!1" });
+	});
+
+	it("keeps hrefs alongside link IDs when href removal is disabled", async () => {
+		featureFlags.disableHref = false;
+		let prompt = "";
+		__setProviderOverrideForTests("openai", async (args) => {
+			prompt = args.prompt;
+			return {
+				content: [
+					"items:",
+					"  - link_id: link_1",
+					"    summary: Product",
+				].join("\n"),
+				usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+				reasoning_tokens: "",
+			};
+		});
+
+		const result = await extractDataResultsFromSnapshot({
+			task: "Extract products",
+			currentUrl: "https://example.com/catalog",
+			simplifiedDom: 'a href="/product": Product',
+			llmOptions: LLM_OPTIONS,
+		});
+
+		assert.include(prompt, 'a href="/product" link_id="link_1": Product');
+		assert.deepStrictEqual(result.items, [
+			{ link: "https://example.com/product", summary: "Product" },
+		]);
 	});
 
 	it("resolves browser URL forms and falls back for unusable hrefs", async () => {

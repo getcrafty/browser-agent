@@ -525,6 +525,7 @@ interface SessionSnapshot {
 	lastProgressSignature: string | null;
 	sameActionSignatureStreak: number;
 	noProgressStreak: number;
+	incrementalDomContext: BrowserSession["incrementalDomContext"];
 	dataExtractionCheckpoint: ReturnType<
 		BrowserSession["dataExtractionCoordinator"]["checkpoint"]
 	>;
@@ -570,6 +571,14 @@ function snapshotSession(session: BrowserSession): SessionSnapshot {
 		lastProgressSignature: session.lastProgressSignature,
 		sameActionSignatureStreak: session.sameActionSignatureStreak,
 		noProgressStreak: session.noProgressStreak,
+		incrementalDomContext: {
+			committed: session.incrementalDomContext.committed
+				? { ...session.incrementalDomContext.committed }
+				: undefined,
+			pending: session.incrementalDomContext.pending
+				? { ...session.incrementalDomContext.pending }
+				: undefined,
+		},
 		dataExtractionCheckpoint:
 			session.dataExtractionCoordinator.checkpoint(),
 		memoryFileContents: (() => {
@@ -629,6 +638,14 @@ async function restoreSession(
 	session.lastProgressSignature = snapshot.lastProgressSignature;
 	session.sameActionSignatureStreak = snapshot.sameActionSignatureStreak;
 	session.noProgressStreak = snapshot.noProgressStreak;
+	session.incrementalDomContext = {
+		committed: snapshot.incrementalDomContext.committed
+			? { ...snapshot.incrementalDomContext.committed }
+			: undefined,
+		pending: snapshot.incrementalDomContext.pending
+			? { ...snapshot.incrementalDomContext.pending }
+			: undefined,
+	};
 	session.dataExtractionCoordinator.rollback(
 		snapshot.dataExtractionCheckpoint,
 	);
@@ -795,6 +812,21 @@ export async function runAgent(
 					validatorFailureCount;
 				const pendingValidatorFeedbackAtAttemptStart =
 					pendingValidatorFeedback;
+				const historyDomContextsAtAttemptStart = stepsHistory.map(
+					(entry) => ({
+						hasHtml: Object.prototype.hasOwnProperty.call(
+							entry.payload,
+							"html",
+						),
+						html: entry.payload.html,
+						hasHtmlContextMode:
+							Object.prototype.hasOwnProperty.call(
+								entry.payload,
+								"htmlContextMode",
+							),
+						htmlContextMode: entry.payload.htmlContextMode,
+					}),
+				);
 				const lengths = {
 					stepsHistory: stepsHistory.length,
 					usages: usages.length,
@@ -845,10 +877,7 @@ export async function runAgent(
 						stepArtifacts.push({
 							stepNumber,
 							simplifiedDomYaml:
-								typeof promptResult.prompt.payload.html ===
-								"string"
-									? promptResult.prompt.payload.html
-									: "",
+								promptResult.artifacts.canonicalSimplifiedDom,
 							contextJson: serializeStepContextForDisk(
 								promptResult.prompt.messages as Message[],
 							),
@@ -866,10 +895,8 @@ export async function runAgent(
 								messages: promptResult.prompt
 									.messages as Message[],
 								simplifiedDom:
-									typeof promptResult.prompt.payload.html ===
-									"string"
-										? promptResult.prompt.payload.html
-										: "",
+									promptResult.artifacts
+										.canonicalSimplifiedDom,
 								browser: session.browser,
 								memoryFile: session.memoryFile,
 								extractDataMemoryFile:
@@ -1160,10 +1187,8 @@ export async function runAgent(
 								messages: promptResult.prompt
 									.messages as Message[],
 								simplifiedDom:
-									typeof promptResult.prompt.payload.html ===
-									"string"
-										? promptResult.prompt.payload.html
-										: "",
+									promptResult.artifacts
+										.canonicalSimplifiedDom,
 								browser: session.browser,
 								memoryFile: session.memoryFile,
 								extractDataMemoryFile:
@@ -1334,6 +1359,27 @@ export async function runAgent(
 					validatorFailureCount = validatorFailureCountAtAttemptStart;
 					pendingValidatorFeedback =
 						pendingValidatorFeedbackAtAttemptStart;
+					for (
+						let index = 0;
+						index < historyDomContextsAtAttemptStart.length;
+						index++
+					) {
+						const entry = stepsHistory[index];
+						const domContext =
+							historyDomContextsAtAttemptStart[index];
+						if (!entry || !domContext) continue;
+						if (domContext.hasHtml) {
+							entry.payload.html = domContext.html;
+						} else {
+							delete entry.payload.html;
+						}
+						if (domContext.hasHtmlContextMode) {
+							entry.payload.htmlContextMode =
+								domContext.htmlContextMode;
+						} else {
+							delete entry.payload.htmlContextMode;
+						}
+					}
 					stepsHistory.length = lengths.stepsHistory;
 					usages.length = lengths.usages;
 					steps.length = lengths.steps;

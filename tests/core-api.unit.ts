@@ -41,6 +41,7 @@ describe("core-api", () => {
 		configFeatureFlags.omitExecutorThinkingField;
 	const originalExecutorReasoningTraceContext =
 		featureFlags.executorReasoningTraceContext;
+	const originalIncrementalDomContext = featureFlags.incrementalDomContext;
 	const originalEnablePlanning = featureFlags.enablePlanning;
 	const originalWebsiteAPIficationTools =
 		configFeatureFlags.websiteAPIficationTools;
@@ -50,6 +51,7 @@ describe("core-api", () => {
 			originalOmitExecutorThinkingField;
 		featureFlags.executorReasoningTraceContext =
 			originalExecutorReasoningTraceContext;
+		featureFlags.incrementalDomContext = originalIncrementalDomContext;
 		featureFlags.enablePlanning = originalEnablePlanning;
 		configFeatureFlags.websiteAPIficationTools =
 			originalWebsiteAPIficationTools;
@@ -1165,8 +1167,9 @@ describe("core-api", () => {
 		}
 	});
 
-	it("step(process_model_step_output) never stores reasoning traces for OpenAI", async () => {
+	it("step(process_model_step_output) omits OpenAI reasoning traces when incremental context is disabled", async () => {
 		featureFlags.executorReasoningTraceContext = true;
+		featureFlags.incrementalDomContext = false;
 		const stepsHistory: Array<{
 			payload: Record<string, unknown>;
 			assistant: unknown;
@@ -1197,6 +1200,39 @@ describe("core-api", () => {
 		assert.notProperty(
 			stepsHistory[0].assistant as Record<string, unknown>,
 			"done",
+		);
+	});
+
+	it("step(process_model_step_output) stores reasoning tokens with incremental context", async () => {
+		featureFlags.executorReasoningTraceContext = false;
+		featureFlags.incrementalDomContext = true;
+		const stepsHistory: Array<{
+			payload: Record<string, unknown>;
+			assistant: unknown;
+			reasoningTokens?: string;
+		}> = [];
+
+		await step(createMockCoreDeps(), {
+			mode: "process_model_step_output",
+			rawStepOutput: {
+				actions: [],
+				done: false,
+			},
+			promptPayload: {
+				task: "task",
+				currentURL: "https://example.com",
+				htmlContextMode: "full",
+				html: "<main>current</main>",
+			},
+			stepsHistory,
+			executorProvider: "openai",
+			reasoningTokens: "Keep this reasoning in assistant history.",
+		});
+
+		assert.lengthOf(stepsHistory, 1);
+		assert.strictEqual(
+			stepsHistory[0].reasoningTokens,
+			"Keep this reasoning in assistant history.",
 		);
 	});
 

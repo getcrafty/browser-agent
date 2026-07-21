@@ -5,10 +5,11 @@ import { formatStepForPrompt } from "../agents/executor-utils/step-execution.js"
 import { normalizeActionList } from "../agents/executor-utils/action-normalization.js";
 import type { StepHistoryEntry } from "./types.js";
 import { configFeatureFlags } from "../config-feature-flags.js";
+import { stripDomContextFromHistoryPayload } from "../agents/executor-utils/history-payload.js";
 import type { PreviousStepStatus } from "../agents/types.js";
 import { featureFlags } from "../featureFlags.js";
 import {
-	shouldUseExecutorReasoningTraceContext,
+	shouldIncludeExecutorReasoningHistory,
 	type ExecutorPromptOptions,
 } from "../agents/prompts.js";
 
@@ -112,7 +113,7 @@ function injectReasoningTrace(params: {
 	reasoningTokens?: string;
 	options: ExecutorPromptOptions;
 }): string {
-	if (!shouldUseExecutorReasoningTraceContext(params.options)) {
+	if (!shouldIncludeExecutorReasoningHistory(params.options)) {
 		return params.content;
 	}
 	const reasoningTrace = params.reasoningTokens?.trim();
@@ -123,11 +124,17 @@ function injectReasoningTrace(params: {
 export function buildHistoryMessagesFromFullStepHistory(
 	stepsHistory: StepHistoryEntry[],
 	options: ExecutorPromptOptions = {},
+	historyOptions: {
+		omitDomContext?: boolean;
+	} = {},
 ): Message[] {
 	const messages: Message[] = [];
 
 	for (const step of stepsHistory) {
 		const payload = { ...step.payload };
+		if (historyOptions.omitDomContext) {
+			stripDomContextFromHistoryPayload(payload);
+		}
 		delete payload.validBids;
 		if (!featureFlags.enablePlanning) {
 			delete payload.plan;

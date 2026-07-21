@@ -1,5 +1,6 @@
 import { assert } from "chai";
 import { describe, it } from "mocha";
+import yaml from "js-yaml";
 import { buildStepMessages } from "../src/agents/executor-utils/step-execution.js";
 import type {
 	LLMOptions,
@@ -199,5 +200,62 @@ describe("prompt-budget", () => {
 			String(result.payload.html),
 			"...[truncated for context budget]...",
 		);
+	});
+
+	it("rebases a diff to full HTML before evicting its anchor", () => {
+		const canonicalHtml = "current-line\n".repeat(20);
+		const history: Message[] = [
+			{
+				role: "user",
+				content: yaml.dump({
+					currentURL: "https://example.com",
+					htmlContextMode: "full",
+					html: "old-line\n".repeat(60),
+				}),
+			},
+			{ role: "assistant", content: "tools: []" },
+		];
+		const payload = {
+			currentURL: "https://example.com",
+			htmlContextMode: "diff",
+			html: "@@ -1,1 +1,1 @@\n-old\n+new",
+		};
+		const rebasedHistory: Message[] = [
+			{
+				role: "user",
+				content: yaml.dump({
+					currentURL: "https://example.com",
+				}),
+			},
+			history[1],
+		];
+		const rebasedMessages = buildStepMessages({
+			systemPrompt: "SYSTEM",
+			history: rebasedHistory,
+			payload: {
+				...payload,
+				htmlContextMode: "full",
+				html: canonicalHtml,
+			},
+		});
+
+		const result = fitStepPromptToBudget({
+			llmOptions: makeBudget(estimateMessages(rebasedMessages)),
+			systemPrompt: "SYSTEM",
+			history,
+			payload,
+			buildStepMessages,
+			estimateTokenCount,
+			incrementalDomContext: {
+				enabled: true,
+				canonicalHtml,
+			},
+		});
+
+		assert.strictEqual(result.payload.htmlContextMode, "full");
+		assert.strictEqual(result.payload.html, canonicalHtml);
+		assert.notInclude(JSON.stringify(result.messages), "old-line");
+		assert.include(JSON.stringify(result.messages), "currentURL");
+		assert.include(JSON.stringify(result.messages), "tools: []");
 	});
 });
