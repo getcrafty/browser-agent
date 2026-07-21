@@ -49,7 +49,10 @@ describe("executor reasoning prompt flags", () => {
 
 		assert.include(runAgentPrompt, "previousStepStatus");
 		assert.notInclude(plannerEmbedPrompt, "previousStepStatus");
-		assert.include(runAgentPrompt, "ALWAYS THINK OR REASON BEFORE ANSWERING.");
+		assert.notInclude(
+			runAgentPrompt,
+			"ALWAYS THINK OR REASON BEFORE ANSWERING.",
+		);
 	});
 
 	it("uses only current HTML bid instructions", () => {

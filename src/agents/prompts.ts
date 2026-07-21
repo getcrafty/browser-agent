@@ -281,10 +281,6 @@ function getWebsiteToolShorthandInstruction(
 	return "  - website_tool: use a map with name and inputs\n";
 }
 
-function getExecutorFinalReasoningInstruction(): string {
-	return "ALWAYS THINK OR REASON BEFORE ANSWERING.";
-}
-
 function getExecutorSectionPayloadFormat(
 	options: ExecutorPromptOptions = {},
 ): string {
@@ -611,7 +607,6 @@ ${sequentialPlanInstruction}- If a tool call is meant to trigger a search, make 
 	- For tasks involving workspace/local file contents, or file/document contents without a specific web URL, prefer retrieving available memoryContent with "memory_read" before using browser search or upload workflows to discover what is inside the file.
 	- DO NOT OUTPUT ANYTHING BUT YAML IN YOUR RESPONSE. DO NOT SAY ANYTHING ELSE OUTSIDE OF THE YAML.
 - You are encouraged to take multiple tool calls at the same time but if things get confusing, SLOW DOWN. In case you get stuck completely on a website (e.g. past 10 tasks have not gotten you closer to completing your goal), you could try to navigate to a different website that you think might help you achieve the task.
-- ${getExecutorFinalReasoningInstruction()}
 - Make sure to wait for results to be loaded before sending the results to the user. Also, you have to make sure that you're actually sending a summary of what you see on the page adapted to the user's prompt, not just a generic message like "I see the search results page" or "I see a page with some products". For example, if the user asked you to find a specific product, you should check if you can see that product in the page and mention it in your reasoning and final answer.`;
 }
 
