@@ -125,27 +125,63 @@ describe("executor prompt user_takeover tool", () => {
 	});
 
 	it("shows one concrete YAML response example bounded by tags", () => {
-		const prompt = getExecutorSystem();
-		const exampleMatch = prompt.match(
-			/Example response:\n<yaml>\n([\s\S]*?)\n<\/yaml>/,
-		);
+		const originalEnablePlanning = featureFlags.enablePlanning;
+		featureFlags.enablePlanning = false;
+		try {
+			const prompt = getExecutorSystem();
+			const exampleMatch = prompt.match(
+				/Example response:\n<yaml>\n([\s\S]*?)\n<\/yaml>/,
+			);
 
-		assert.isNotNull(exampleMatch);
-		const example = yaml.load(exampleMatch?.[1] ?? "") as Record<
-			string,
-			unknown
-		>;
-		assert.deepInclude(example, {
-			tools: [
-				{
-					type: "5",
-					text: "browser automation",
-					enter: true,
-				},
-			],
-		});
-		assert.notProperty(example, "previousStepPlanUpdate");
-		assert.strictEqual(prompt.split("Example response:").length - 1, 1);
+			assert.isNotNull(exampleMatch);
+			const exampleYaml = exampleMatch?.[1] ?? "";
+			const example = yaml.load(exampleYaml) as Record<string, unknown>;
+			assert.deepInclude(example, {
+				previousStepStatus: "progressed",
+				previousStepOutcome: "Opened the search form.",
+				currentStateObservation: "The search field is visible.",
+				nextActionRationale: "Enter the requested query.",
+				tools: [
+					{
+						type: "5",
+						text: "browser automation",
+						enter: true,
+					},
+				],
+			});
+			assert.notProperty(example, "previousStepPlanUpdate");
+			for (const obsoleteExampleTool of [
+				"long_press",
+				"download_current_file",
+				"return_results",
+				"extract_data",
+			]) {
+				assert.notInclude(exampleYaml, obsoleteExampleTool);
+			}
+			assert.strictEqual(prompt.split("Example response:").length - 1, 1);
+		} finally {
+			featureFlags.enablePlanning = originalEnablePlanning;
+		}
+	});
+
+	it("adds previousStepPlanUpdate to the example only when planning is enabled", () => {
+		const originalEnablePlanning = featureFlags.enablePlanning;
+		featureFlags.enablePlanning = true;
+		try {
+			const exampleMatch = getExecutorSystem().match(
+				/Example response:\n<yaml>\n([\s\S]*?)\n<\/yaml>/,
+			);
+			const example = yaml.load(exampleMatch?.[1] ?? "") as Record<
+				string,
+				unknown
+			>;
+
+			assert.deepEqual(example.previousStepPlanUpdate, []);
+			assert.strictEqual(example.previousStepStatus, "progressed");
+			assert.property(example, "tools");
+		} finally {
+			featureFlags.enablePlanning = originalEnablePlanning;
+		}
 	});
 
 	it("includes action-context schema alongside omitted thinking", () => {

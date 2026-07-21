@@ -339,6 +339,9 @@ function getExecutorSectionResponseFormat(
 	const resultSourceRule = websiteToolResultsEnabled
 		? "completed extract_data, memoryContent exposed by memory_read, or websiteToolResults"
 		: "completed extract_data or memoryContent exposed by memory_read";
+	const planUpdateExampleBlock = isPlanningEnabled()
+		? "previousStepPlanUpdate: []\n"
+		: "";
 	const actionContextExampleBlock = getExecutorActionContextPreamble(options);
 	const regeneratePlanShorthandInstruction = isPlanningEnabled()
 		? "  - regenerate_plan: use the tool name only\n"
@@ -353,15 +356,14 @@ Respond with raw YAML enclosed by <yaml> and </yaml> tags. Everything between th
 
 Example response:
 <yaml>
-${actionContextExampleBlock}tools:
+${planUpdateExampleBlock}${actionContextExampleBlock}tools:
   - type: "5"
     text: "browser automation"
     enter: true
 </yaml>
 
 Rules:
-- All fields in the response are MANDATORY.
-- Do not provide done or result fields.
+- All top level fields in the response are MANDATORY.
 - The only normal way to complete the task is to call return_results using evidence from ${resultSourceRule}. The runtime transparently waits for pending extractions before memory_read and return_results execute; do not poll or add wait calls for extraction completion.
 ${actionContextRules}- Final result objects returned by return_results follow EXACTLY THIS FORMAT:
   - link: URL to the source page for that data item (mandatory).

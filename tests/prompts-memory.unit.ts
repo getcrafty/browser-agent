@@ -65,7 +65,7 @@ describe("executor memory prompt", () => {
 		);
 		assert.notInclude(prompt, "\ndone:");
 		assert.notInclude(prompt, "done MUST");
-		assert.include(prompt, "Do not provide done or result fields.");
+		assert.notInclude(prompt, "Do not provide done or result fields.");
 		assert.include(prompt, "completed extract_data");
 		assert.include(prompt, "memoryContent after memory_read");
 		assert.notInclude(prompt, "websiteToolResults");
@@ -77,7 +77,7 @@ describe("executor memory prompt", () => {
 			prompt,
 			"Use to store intermediate findings, but not intermediate results",
 		);
-		assert.include(prompt, 'extract_data: "!a"');
+		assert.include(prompt, 'extract_data: "!a,42,!b"');
 		assert.notInclude(prompt, 'extract_data:\n      root: "!a"');
 		assert.include(prompt, "ncid handle");
 		assert.include(
@@ -159,8 +159,9 @@ describe("executor memory prompt", () => {
 			const prompt = getExecutorSystemBase();
 			assert.include(
 				prompt,
-				`agent_takeover:\n      request: "Create ./downloads/report/financial_report.pdf from ./downloads/report/source.txt, then verify the PDF exists."`,
+				`agent_takeover:\n  - Use only for local/workspace/downloaded file work that the browser cannot do directly.`,
 			);
+			assert.include(prompt, "agent_takeover: use a map with request");
 			assert.include(prompt, `Provide a non-empty "request" string`);
 			assert.include(prompt, "bounded file postprocessing");
 			assert.include(prompt, "requested output filename/path");
