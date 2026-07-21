@@ -1,8 +1,6 @@
 export const featureFlags = {
 	// Controls initial planning, replanning, and plan-related executor prompt/context fields.
 	enablePlanning: false,
-	// Removes href values from model-visible simplified DOM while preserving extraction link IDs.
-	disableHref: true,
 	// Replaces vertically distant simplified-DOM subtrees with scroll-to-reveal placeholders.
 	hideOffscreenDomContent: false,
 	// Controls exposing prune/unprune live-DOM actions in executor prompts and execution.

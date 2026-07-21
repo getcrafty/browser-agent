@@ -27,13 +27,28 @@
 - Google Chrome or a compatible Chromium installation
 - An API key for the configured model provider
 
-Supported providers include OpenAI, Anthropic, Google, Together, and vLLM-compatible endpoints.
+Supported providers include OpenAI, OpenRouter, Anthropic, Google, Together, and vLLM-compatible endpoints.
+
+To pin an OpenRouter model to one inference provider without fallbacks, set
+`openrouter_provider` in the YAML configuration:
+
+```yaml
+provider: openrouter
+model: z-ai/glm-5.2
+reasoning_effort: xhigh
+openrouter_provider: baseten/fp8
+```
+
+`openrouter_provider` is valid only with `provider: openrouter`. It maps to an
+OpenRouter `only` constraint with provider fallbacks disabled. Exact endpoint
+IDs containing a precision suffix, such as `baseten/fp8`, are passed through
+unchanged.
 
 ## SDKs
 
 Browser Agent provides TypeScript and Python SDKs for running browser automation tasks. Both SDKs start the bundled executable, stream progress events, and return a final result.
 
-Set `OPENAI_API_KEY` or pass the API key directly when creating the agent.
+Set the selected provider's API-key environment variable, such as `OPENAI_API_KEY` or `OPENROUTER_API_KEY`, or pass the API key directly when creating the agent.
 
 ### TypeScript
 

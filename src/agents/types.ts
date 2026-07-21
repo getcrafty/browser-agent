@@ -37,6 +37,7 @@ export interface LLMOptions {
 	maxModelLen?: number;
 	reserveOutputTokens?: number;
 	endpointUrl?: string;
+	openrouterProvider?: string;
 }
 
 export interface TokenUsage {

@@ -42,7 +42,7 @@ describe("simplify-dom range attributes", function () {
 		}
 	});
 
-	it("removes all href forms while preserving anchor text", async () => {
+	it("keeps href attributes while normalizing javascript URLs", async () => {
 		let browser: Browser | null = null;
 		try {
 			browser = await launch(undefined, true);
@@ -53,11 +53,12 @@ describe("simplify-dom range attributes", function () {
 
 			const simplified = await getSimplifiedDOM(browser);
 
-			assert.notMatch(
+			assert.match(
 				simplified,
-				/\bhref(?:=|\b)/i,
-				"simplified DOM should not include href attributes",
+				/href=""/i,
+				"javascript hrefs should be retained as normalized empty values",
 			);
+			assert.include(simplified, 'href="/keep"');
 			assert.include(simplified, "A1");
 			assert.include(simplified, "A2");
 			assert.include(simplified, "A3");

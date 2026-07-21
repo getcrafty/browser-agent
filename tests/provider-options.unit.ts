@@ -1,6 +1,7 @@
 import { assert } from "chai";
 import { describe, it } from "mocha";
 import {
+	__buildOpenRouterModelSettingsForTests,
 	__buildProviderOptionsForTests,
 	__toTokenUsageForTests,
 } from "../src/agents/providers/ai-sdk.js";
@@ -47,6 +48,38 @@ describe("provider options", () => {
 		assert.deepEqual(enabled.together, {
 			include_usage: true,
 			reasoningEffort: "max",
+		});
+	});
+
+	it("passes OpenRouter reasoning effort exactly", () => {
+		const options = __buildProviderOptionsForTests({
+			model: "anthropic/claude-sonnet-4",
+			provider: "openrouter",
+			reasoningEffort: "xhigh",
+		});
+
+		assert.deepEqual(options.openrouter, {
+			reasoning: { effort: "xhigh" },
+		});
+		assert.deepEqual(__buildOpenRouterModelSettingsForTests(), {
+			usage: { include: true },
+		});
+	});
+
+	it("pins OpenRouter requests to one provider without fallbacks", () => {
+		const options = __buildProviderOptionsForTests({
+			model: "z-ai/glm-5.2",
+			provider: "openrouter",
+			reasoningEffort: "xhigh",
+			openrouterProvider: " baseten/fp8 ",
+		});
+
+		assert.deepEqual(options.openrouter, {
+			reasoning: { effort: "xhigh" },
+			provider: {
+				only: ["baseten/fp8"],
+				allow_fallbacks: false,
+			},
 		});
 	});
 

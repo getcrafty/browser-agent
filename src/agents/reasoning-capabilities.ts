@@ -1,4 +1,5 @@
 import {
+	OPENROUTER_REASONING_EFFORTS,
 	REASONING_MODEL_CAPABILITIES,
 	type Provider,
 	type ReasoningEffort,
@@ -38,6 +39,22 @@ export function validateReasoningConfiguration(
 		reasoningEffort?: ReasoningEffort;
 	},
 ): void {
+	if (options.provider === "openrouter") {
+		if (options.reasoningEffort === undefined) {
+			throw new Error(
+				`Missing reasoning_effort for provider 'openrouter' model '${options.model}'. Allowed values: ${OPENROUTER_REASONING_EFFORTS.join(", ")}.`,
+			);
+		}
+		const allowedEfforts: readonly ReasoningEffort[] =
+			OPENROUTER_REASONING_EFFORTS;
+		if (!allowedEfforts.includes(options.reasoningEffort)) {
+			throw new Error(
+				`Unsupported reasoning_effort '${options.reasoningEffort}' for provider 'openrouter' model '${options.model}'. Allowed values: ${OPENROUTER_REASONING_EFFORTS.join(", ")}.`,
+			);
+		}
+		return;
+	}
+
 	if (!VALIDATED_PROVIDERS.has(options.provider)) {
 		return;
 	}

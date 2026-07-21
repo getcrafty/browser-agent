@@ -30,7 +30,8 @@ class BrowserAgent:
     def __init__(
         self, *, provider: Provider, model: str, download_directory: str,
         reasoning_effort: ReasoningEffort | None = None, api_key: str | None = None,
-        endpoint_url: str | None = None, headless: bool = False,
+        endpoint_url: str | None = None, openrouter_provider: str | None = None,
+        headless: bool = False,
         executable_path: str | None = None, workspace_directory: str | None = None,
         user_takeover_tool: bool = True, max_steps: int = 50, concurrency: int = 4,
         runs_per_task: int = 1, retry_count: int = 2,

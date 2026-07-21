@@ -81,6 +81,48 @@ test("resolves provider capabilities, paths, environment, and overrides", () => 
 		}).reasoningEffort,
 		"none",
 	);
+	assert.equal(
+		resolveOptions({
+			...base,
+			provider: "openrouter",
+			model: "vendor/new-model",
+			reasoningEffort: "xhigh",
+			openrouterProvider: " baseten/fp8 ",
+		}).reasoningEffort,
+		"xhigh",
+	);
+	assert.equal(
+		resolveOptions({
+			...base,
+			provider: "openrouter",
+			model: "vendor/new-model",
+			reasoningEffort: "xhigh",
+			openrouterProvider: " baseten/fp8 ",
+		}).openrouterProvider,
+		"baseten/fp8",
+	);
+	const previousOpenRouter = process.env.OPENROUTER_API_KEY;
+	process.env.OPENROUTER_API_KEY = "openrouter-environment-key";
+	try {
+		const openrouter = resolveOptions({
+			...base,
+			provider: "openrouter",
+			model: "vendor/new-model",
+			reasoningEffort: "medium",
+			apiKey: " ",
+		});
+		assert.equal(openrouter.apiKey, "openrouter-environment-key");
+		const environment = childEnvironment(openrouter);
+		assert.equal(
+			environment.OPENROUTER_API_KEY,
+			"openrouter-environment-key",
+		);
+		assert.equal(environment.OPENAI_API_KEY, undefined);
+	} finally {
+		if (previousOpenRouter === undefined)
+			delete process.env.OPENROUTER_API_KEY;
+		else process.env.OPENROUTER_API_KEY = previousOpenRouter;
+	}
 	for (const model of ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]) {
 		assert.equal(resolveOptions({ ...base, model }).reasoningEffort, "low");
 	}
@@ -122,6 +164,32 @@ test("rejects every invalid option shape", () => {
 			model: "x",
 			apiKey: "key",
 			reasoningEffort: undefined,
+		},
+		{
+			...base,
+			provider: "openrouter",
+			model: "vendor/model",
+			reasoningEffort: undefined,
+		},
+		{
+			...base,
+			provider: "openrouter",
+			model: "vendor/model",
+			reasoningEffort: "max",
+		},
+		{
+			...base,
+			provider: "openrouter",
+			model: "vendor/model",
+			reasoningEffort: "enabled",
+		},
+		{ ...base, openrouterProvider: "baseten" },
+		{
+			...base,
+			provider: "openrouter",
+			model: "vendor/model",
+			reasoningEffort: "high",
+			openrouterProvider: " ",
 		},
 		{ ...base, maxSteps: 0 },
 		{ ...base, concurrency: 1.5 },

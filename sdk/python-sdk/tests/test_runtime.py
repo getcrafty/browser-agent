@@ -48,6 +48,23 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(Path(workspace).exists())
             self.assertTrue(Path(downloads).exists())
 
+    def test_forwards_openrouter_provider_constraint(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="py-openrouter-config-") as root:
+            files = create_runtime_files(
+                valid(
+                    provider="openrouter",
+                    model="z-ai/glm-5.2",
+                    reasoning_effort="xhigh",
+                    api_key="secret",
+                    openrouter_provider="baseten/fp8",
+                    download_directory=str(Path(root) / "downloads"),
+                ),
+                [BrowserAgentTask("go")],
+            )
+            config = json.loads(Path(files.config_path).read_text())
+            self.assertEqual(config["openrouter_provider"], "baseten/fp8")
+            files.cleanup()
+
     def test_automatic_workspace_and_partial_failure_cleanup(self) -> None:
         with tempfile.TemporaryDirectory(prefix="py-config-failures-") as root:
             options = valid(download_directory=str(Path(root) / "downloads"))

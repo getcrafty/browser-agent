@@ -1103,9 +1103,6 @@ function buildNode(
 	for (const name of KEEP_ATTRS) {
 		const rawValue = attrMap.get(name);
 		if (rawValue === undefined) continue;
-		if (name === "href" && featureFlags.disableHref && !preserveFullHrefs) {
-			continue;
-		}
 		const v =
 			name === "href"
 				? preserveFullHrefs

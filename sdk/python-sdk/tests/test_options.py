@@ -18,6 +18,7 @@ def valid(**overrides: object):
         "reasoning_effort": None,
         "api_key": "key",
         "endpoint_url": None,
+        "openrouter_provider": None,
         "headless": False,
         "executable_path": None,
         "workspace_directory": None,
@@ -55,6 +56,23 @@ class OptionTests(unittest.TestCase):
                 endpoint_url="http://localhost:8000",
             ).api_key
         )
+        with patch.dict(
+            os.environ, {"OPENROUTER_API_KEY": "openrouter-environment-key"}
+        ):
+            openrouter = valid(
+                provider="openrouter",
+                model="vendor/new-model",
+                reasoning_effort="xhigh",
+                api_key=" ",
+                openrouter_provider=" baseten/fp8 ",
+            )
+            self.assertEqual(openrouter.api_key, "openrouter-environment-key")
+            self.assertEqual(openrouter.openrouter_provider, "baseten/fp8")
+            environment = child_environment(openrouter)
+            self.assertEqual(
+                environment["OPENROUTER_API_KEY"], "openrouter-environment-key"
+            )
+            self.assertNotIn("OPENAI_API_KEY", environment)
 
     def test_rejects_invalid_options(self) -> None:
         cases = [
@@ -66,6 +84,28 @@ class OptionTests(unittest.TestCase):
             {"endpoint_url": "bad"},
             {"endpoint_url": "ftp://example.com"},
             {"provider": "vllm", "model": "qwen", "endpoint_url": None},
+            {
+                "provider": "openrouter",
+                "model": "vendor/model",
+                "reasoning_effort": None,
+            },
+            {
+                "provider": "openrouter",
+                "model": "vendor/model",
+                "reasoning_effort": "max",
+            },
+            {
+                "provider": "openrouter",
+                "model": "vendor/model",
+                "reasoning_effort": "enabled",
+            },
+            {"openrouter_provider": "baseten"},
+            {
+                "provider": "openrouter",
+                "model": "vendor/model",
+                "reasoning_effort": "high",
+                "openrouter_provider": " ",
+            },
             {"api_key": ""},
             {"retry_count": -1},
             {"retry_count": 1.5},
@@ -86,6 +126,7 @@ class OptionTests(unittest.TestCase):
         self.assertEqual(reasoning("together", "zai-org/GLM-5.2", None), "high")
         self.assertEqual(reasoning("vllm", "my-QWEN", None), "enabled")
         self.assertEqual(reasoning("anthropic", "custom", "none"), "none")
+        self.assertEqual(reasoning("openrouter", "vendor/model", "xhigh"), "xhigh")
         for provider, model, effort in [
             ("openai", "unknown", None),
             ("openai", "gpt-5.2-codex", None),

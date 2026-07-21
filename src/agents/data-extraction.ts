@@ -6,7 +6,6 @@ import type {
 	Message,
 	StageModelInvocationTrace,
 } from "./types.js";
-import { featureFlags } from "../featureFlags.js";
 
 export interface ExtractDataResultsFromSnapshotInput {
 	task: string;
@@ -63,9 +62,6 @@ function annotateDomLinks(
 		const linkId = `link_${nextId++}`;
 		linksById.set(linkId, href);
 		const attributeEnd = (match.index ?? 0) + match[0].length;
-		if (featureFlags.disableHref) {
-			return `${line.slice(0, match.index)}link_id=${JSON.stringify(linkId)}${line.slice(attributeEnd)}`;
-		}
 		return `${line.slice(0, attributeEnd)} link_id=${JSON.stringify(linkId)}${line.slice(attributeEnd)}`;
 	});
 

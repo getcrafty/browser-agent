@@ -18,7 +18,11 @@ PROVIDER_ENV: dict[Provider, str] = {
     "google": "GOOGLE_API_KEY",
     "together": "TOGETHER_API_KEY",
     "vllm": "VLLM_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
 }
+OPENROUTER_REASONING_EFFORTS = (
+    "none", "minimal", "low", "medium", "high", "xhigh",
+)
 OPENAI = (
     "gpt-5.4", "gpt-5.4-mini", "gpt-5.5",
     "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol",
@@ -38,6 +42,7 @@ class ResolvedOptions:
     api_key: str | None
     api_key_environment: str
     endpoint_url: str | None
+    openrouter_provider: str | None
     headless: bool
     executable_path: str | None
     download_directory: str
@@ -66,6 +71,8 @@ def reasoning(provider: Provider, model: str, effort: ReasoningEffort | None):
     resolved = effort or (capability[4] if capability else None)
     if resolved is None:
         invalid("reasoning_effort is required for this model.")
+    if provider == "openrouter" and resolved not in OPENROUTER_REASONING_EFFORTS:
+        invalid(f"Unsupported reasoning_effort '{resolved}' for OpenRouter.")
     if capability and resolved not in capability[3]:
         invalid(f"Unsupported reasoning_effort '{resolved}' for this model.")
     return resolved
@@ -85,6 +92,13 @@ def resolve_options(**values) -> ResolvedOptions:
             invalid("endpoint_url must be an absolute HTTP(S) URL.")
     if provider == "vllm" and not endpoint:
         invalid("endpoint_url is required for vllm.")
+    openrouter_provider = values["openrouter_provider"]
+    if openrouter_provider is not None:
+        if not isinstance(openrouter_provider, str) or not openrouter_provider.strip():
+            invalid("openrouter_provider must be a non-empty string.")
+        if provider != "openrouter":
+            invalid("openrouter_provider can only be used with OpenRouter.")
+        openrouter_provider = openrouter_provider.strip()
     environment = PROVIDER_ENV[provider]
     api_key = (values["api_key"] or "").strip() or os.environ.get(environment)
     if provider != "vllm" and not api_key:
@@ -95,7 +109,8 @@ def resolve_options(**values) -> ResolvedOptions:
     absolute = lambda value: str(Path(value).resolve()) if value else None
     return ResolvedOptions(
         provider, model.strip(), reasoning(provider, model.strip(), values["reasoning_effort"]),
-        api_key, environment, endpoint, values["headless"], absolute(values["executable_path"]),
+        api_key, environment, endpoint, openrouter_provider, values["headless"],
+        absolute(values["executable_path"]),
         absolute(downloads) or "", absolute(values["workspace_directory"]),
         values["user_takeover_tool"], positive(values["max_steps"], 50),
         positive(values["concurrency"], 4), positive(values["runs_per_task"], 1),

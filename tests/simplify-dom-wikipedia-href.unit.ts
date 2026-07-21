@@ -1,9 +1,6 @@
 import { assert } from "chai";
-import { afterEach, describe, it } from "mocha";
+import { describe, it } from "mocha";
 import { getSimplifiedDOM } from "../src/browser/simplify-dom.js";
-import { featureFlags } from "../src/featureFlags.js";
-
-const originalDisableHref = featureFlags.disableHref;
 
 function makeSnapshotWithAnchor(
 	documentUrl: string,
@@ -83,48 +80,15 @@ function createMockBrowser(snapshot: any): any {
 }
 
 describe("simplify-dom wikipedia href normalization", () => {
-	afterEach(() => {
-		featureFlags.disableHref = originalDisableHref;
-	});
-
-	it("removes href while preserving anchor text and bids", async () => {
-		const browser = createMockBrowser(
-			makeSnapshotWithAnchor("https://en.wikipedia.org/wiki/Google"),
-		);
-		const simplified = await getSimplifiedDOM(browser);
-		assert.notInclude(simplified, "href");
-		assert.include(simplified, `bid="abc"`);
-		assert.include(simplified, "Google");
-	});
-
-	it("removes empty, long, javascript, and ordinary href values", async () => {
-		const hrefs = [
-			"",
-			`https://example.com/${"a".repeat(180)}`,
-			"javascript:void(0)",
-			"/ordinary",
-		];
-
-		for (const href of hrefs) {
-			const simplified = await getSimplifiedDOM(
-				createMockBrowser(
-					makeSnapshotWithAnchor("https://example.com/page", href),
-				),
-			);
-			assert.notInclude(simplified, "href");
-			assert.include(simplified, `bid="abc"`);
-			assert.include(simplified, "Google");
-		}
-	});
-
-	it("restores wikipedia href normalization when disabled", async () => {
-		featureFlags.disableHref = false;
+	it("normalizes wikipedia hrefs while preserving anchors", async () => {
 		const browser = createMockBrowser(
 			makeSnapshotWithAnchor("https://en.wikipedia.org/wiki/Google"),
 		);
 		const simplified = await getSimplifiedDOM(browser);
 		assert.include(simplified, `href=""`);
 		assert.notInclude(simplified, `href="/wiki/Google"`);
+		assert.include(simplified, `bid="abc"`);
+		assert.include(simplified, "Google");
 	});
 
 	it("preserves the raw href on wikipedia pages when requested", async () => {
@@ -138,7 +102,6 @@ describe("simplify-dom wikipedia href normalization", () => {
 	});
 
 	it("keeps href value on non-wikipedia pages", async () => {
-		featureFlags.disableHref = false;
 		const browser = createMockBrowser(
 			makeSnapshotWithAnchor("https://example.com/page"),
 		);
@@ -146,8 +109,7 @@ describe("simplify-dom wikipedia href normalization", () => {
 		assert.include(simplified, `href="/wiki/Google"`);
 	});
 
-	it("restores javascript href normalization when disabled", async () => {
-		featureFlags.disableHref = false;
+	it("normalizes javascript hrefs", async () => {
 		const browser = createMockBrowser(
 			makeSnapshotWithAnchor(
 				"https://example.com/page",

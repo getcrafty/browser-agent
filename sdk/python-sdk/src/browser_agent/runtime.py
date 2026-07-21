@@ -118,6 +118,8 @@ def create_runtime_files(options: ResolvedOptions, tasks: list[BrowserAgentTask]
             "provider": options.provider, "model": options.model,
             "reasoning_effort": options.reasoning_effort,
             **({"endpoint_url": options.endpoint_url} if options.endpoint_url else {}),
+            **({"openrouter_provider": options.openrouter_provider}
+               if options.openrouter_provider else {}),
             "feature_flags": {"user_takeover_tool": options.user_takeover_tool},
             "headless": options.headless,
             **({"executable_path": options.executable_path} if options.executable_path else {}),

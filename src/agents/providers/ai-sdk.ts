@@ -8,6 +8,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import OpenAI from "openai";
 import type { LLMOptions, TokenUsage, Provider } from "../types.js";
 import {
@@ -16,6 +17,7 @@ import {
 } from "../reasoning-capabilities.js";
 
 const TOGETHER_DEFAULT_BASE_URL = "https://api.together.xyz/v1";
+const OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 
 export const SUPPORTED_MODEL_PROVIDERS = [
 	{
@@ -43,6 +45,11 @@ export const SUPPORTED_MODEL_PROVIDERS = [
 		adapter: "openai-compatible",
 		requiresApiKey: true,
 	},
+	{
+		id: "openrouter",
+		adapter: "openrouter",
+		requiresApiKey: true,
+	},
 ] as const;
 
 type ProviderDefinition = (typeof SUPPORTED_MODEL_PROVIDERS)[number];
@@ -54,6 +61,10 @@ interface ProviderRuntimeConfig {
 	adapter: ProviderAdapter;
 	apiKey?: string;
 	endpointUrl?: string;
+}
+
+function buildOpenRouterModelSettings() {
+	return { usage: { include: true } } as const;
 }
 
 export interface ProviderChatArgs {
@@ -113,6 +124,9 @@ function resolveEnvApiKey(provider: Provider): string | undefined {
 	if (provider === "together") {
 		return readEnvString("TOGETHER_API_KEY");
 	}
+	if (provider === "openrouter") {
+		return readEnvString("OPENROUTER_API_KEY");
+	}
 	return readEnvString("VLLM_API_KEY") || readEnvString("OPENAI_API_KEY");
 }
 
@@ -128,6 +142,9 @@ function resolveEndpointUrl(options: LLMOptions): string | undefined {
 	if (options.provider === "together") {
 		return options.endpointUrl || TOGETHER_DEFAULT_BASE_URL;
 	}
+	if (options.provider === "openrouter") {
+		return options.endpointUrl || OPENROUTER_DEFAULT_BASE_URL;
+	}
 	if (options.provider === "vllm") {
 		return options.endpointUrl || readEnvString("VLLM_BASE_URL");
 	}
@@ -137,6 +154,21 @@ function resolveEndpointUrl(options: LLMOptions): string | undefined {
 export function resolveProviderRuntimeConfig(
 	options: LLMOptions,
 ): ProviderRuntimeConfig {
+	if (
+		options.openrouterProvider !== undefined &&
+		(typeof options.openrouterProvider !== "string" ||
+			!options.openrouterProvider.trim())
+	) {
+		throw new Error("openrouterProvider must be a non-empty string.");
+	}
+	if (
+		options.openrouterProvider !== undefined &&
+		options.provider !== "openrouter"
+	) {
+		throw new Error(
+			"openrouterProvider can only be used with provider 'openrouter'.",
+		);
+	}
 	const providerDefinition = getProviderDefinition(options.provider);
 	const apiKey = resolveApiKey(options);
 	const endpointUrl = resolveEndpointUrl(options);
@@ -164,6 +196,13 @@ function buildLanguageModel(options: {
 	model: string;
 	runtimeConfig: ProviderRuntimeConfig;
 }) {
+	if (options.runtimeConfig.adapter === "openrouter") {
+		return createOpenRouter({
+			apiKey: options.runtimeConfig.apiKey!,
+			baseURL: options.runtimeConfig.endpointUrl,
+			compatibility: "strict",
+		})(options.model, buildOpenRouterModelSettings());
+	}
 	if (options.runtimeConfig.adapter === "openai-compatible") {
 		if (!options.runtimeConfig.endpointUrl) {
 			throw new Error(
@@ -304,6 +343,7 @@ function buildProviderOptions(params: {
 	model: string;
 	provider: Provider;
 	reasoningEffort: NonNullable<LLMOptions["reasoningEffort"]>;
+	openrouterProvider?: string;
 }) {
 	if (params.provider === "openai") {
 		return {
@@ -362,6 +402,22 @@ function buildProviderOptions(params: {
 		};
 	}
 
+	if (params.provider === "openrouter") {
+		return {
+			openrouter: {
+				reasoning: { effort: params.reasoningEffort },
+				...(params.openrouterProvider
+					? {
+							provider: {
+								only: [params.openrouterProvider.trim()],
+								allow_fallbacks: false,
+							},
+						}
+					: {}),
+			},
+		};
+	}
+
 	return {
 		openai: {
 			include_usage: true,
@@ -393,6 +449,7 @@ async function runProviderChatInternal(args: ProviderChatArgs): Promise<{
 		model: args.options.model,
 		provider: args.options.provider,
 		reasoningEffort: args.options.reasoningEffort!,
+		openrouterProvider: args.options.openrouterProvider,
 	});
 
 	if (args.onOutputChunk) {
@@ -476,6 +533,7 @@ export function __buildProviderOptionsForTests(params: {
 	model: string;
 	provider: Provider;
 	reasoningEffort: NonNullable<LLMOptions["reasoningEffort"]>;
+	openrouterProvider?: string;
 }) {
 	validateReasoningConfiguration({
 		provider: params.provider,
@@ -483,6 +541,10 @@ export function __buildProviderOptionsForTests(params: {
 		reasoningEffort: params.reasoningEffort,
 	});
 	return buildProviderOptions(params);
+}
+
+export function __buildOpenRouterModelSettingsForTests() {
+	return buildOpenRouterModelSettings();
 }
 
 export async function runProviderChat(args: ProviderChatArgs): Promise<{
