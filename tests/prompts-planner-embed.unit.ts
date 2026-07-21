@@ -36,15 +36,32 @@ describe("executor planner embed prompt", () => {
 		assert.notInclude(prompt, "Each key (previousStepPlanUpdate");
 	});
 
-	it("keeps full executor sections in runAgent and base prompts", () => {
+	it("keeps core executor sections in runAgent and base prompts", () => {
 		const runAgentPrompt = getExecutorSystem();
 		const basePrompt = getExecutorSystemBase();
 
 		for (const prompt of [runAgentPrompt, basePrompt]) {
 			assert.include(prompt, "### Payload Format");
 			assert.include(prompt, "### Expected Output");
-			assert.include(prompt, "### Misc Instructions");
+			assert.notInclude(prompt, "### Misc Instructions");
 			assert.include(prompt, "previousStepStatus");
+		}
+	});
+
+	it("includes misc instructions only when enableMiscInstruction is enabled", () => {
+		const originalEnableMiscInstruction =
+			featureFlags.enableMiscInstruction;
+		try {
+			featureFlags.enableMiscInstruction = false;
+			assert.notInclude(getExecutorSystem(), "### Misc Instructions");
+			assert.notInclude(getExecutorSystemBase(), "### Misc Instructions");
+
+			featureFlags.enableMiscInstruction = true;
+			assert.include(getExecutorSystem(), "### Misc Instructions");
+			assert.include(getExecutorSystemBase(), "### Misc Instructions");
+		} finally {
+			featureFlags.enableMiscInstruction =
+				originalEnableMiscInstruction;
 		}
 	});
 

@@ -628,7 +628,9 @@ function getExecutorPromptBlock(
 		case "actions":
 			return getExecutorSectionActions(options);
 		case "misc":
-			return getExecutorSectionMisc(options);
+			return featureFlags.enableMiscInstruction
+				? getExecutorSectionMisc(options)
+				: "";
 	}
 }
 

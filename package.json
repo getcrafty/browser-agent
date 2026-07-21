@@ -43,6 +43,7 @@
 		"test": "mocha --timeout 60000 --node-option=import=tsx \"tests/**/*.ts\"",
 		"test:auth-prompt-safety:coverage": "c8 --all --check-coverage --lines 100 --functions 100 --branches 100 --statements 100 --include=src/auth/runtime.ts --include=src/core/step.ts --include=src/core/history-adapter.ts --include=src/agents/executor-utils/history-payload.ts mocha --timeout 180000 --node-option=import=tsx tests/auth-runtime.unit.ts tests/auth-prompt-protection.unit.ts tests/core-api.unit.ts tests/history-prompt-safety.unit.ts",
 		"test:e2e-together": "mocha --timeout 300000 --node-option=import=tsx \"tests/**/*.e2e.ts\"",
+		"print:executor-prompt": "tsx scripts/print-executor-system-prompt.ts",
 		"report:task-outcomes": "tsx scripts/report-task-outcomes.ts"
 	},
 	"dependencies": {

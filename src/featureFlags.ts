@@ -1,6 +1,8 @@
 export const featureFlags = {
 	// Controls initial planning, replanning, and plan-related executor prompt/context fields.
 	enablePlanning: false,
+	// Adds the catch-all executor misc-instructions section to full executor prompts.
+	enableMiscInstruction: false,
 	// Replaces vertically distant simplified-DOM subtrees with scroll-to-reveal placeholders.
 	hideOffscreenDomContent: false,
 	// Controls exposing prune/unprune live-DOM actions in executor prompts and execution.

@@ -9,13 +9,16 @@ import { featureFlags } from "../src/featureFlags.js";
 describe("executor reasoning prompt flags", () => {
 	const originalReasoningTraceContext =
 		featureFlags.executorReasoningTraceContext;
+	const originalEnableMiscInstruction = featureFlags.enableMiscInstruction;
 
 	afterEach(() => {
 		featureFlags.executorReasoningTraceContext = originalReasoningTraceContext;
+		featureFlags.enableMiscInstruction = originalEnableMiscInstruction;
 	});
 
 	it("replaces action-context fields with reasoning trace context for non-OpenAI executors", () => {
 		featureFlags.executorReasoningTraceContext = true;
+		featureFlags.enableMiscInstruction = true;
 		const prompt = getExecutorSystem({ provider: "vllm" });
 
 		for (const field of [
