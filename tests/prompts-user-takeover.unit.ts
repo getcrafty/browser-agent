@@ -113,7 +113,7 @@ describe("executor prompt user_takeover tool", () => {
 			);
 			assert.include(
 				promptWithoutThinking,
-				`Each key (previousStepPlanUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
+				`Each key (previousStepPlanUpdate, checklistUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
 			);
 
 			featureFlags.executorThinkingField = true;
@@ -126,7 +126,7 @@ describe("executor prompt user_takeover tool", () => {
 			);
 			assert.include(
 				promptWithThinking,
-				`Each key (thinking, previousStepPlanUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
+				`Each key (thinking, previousStepPlanUpdate, checklistUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
 			);
 			assert.notInclude(promptWithThinking, "\ndone:");
 			assert.include(promptWithThinking, `previousStepStatus must be one of:`);
@@ -207,7 +207,7 @@ describe("executor prompt user_takeover tool", () => {
 			const prompt = getExecutorSystem();
 			assert.include(
 				prompt,
-				`Each key (previousStepPlanUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
+				`Each key (previousStepPlanUpdate, checklistUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
 			);
 			assert.notInclude(prompt, "\ndone:");
 			assert.include(prompt, `previousStepStatus: "progressed"`);

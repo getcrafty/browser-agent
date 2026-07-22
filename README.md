@@ -124,27 +124,21 @@ See the [Python SDK documentation](./sdk/python-sdk/README.md).
 
 Tasks may include website credentials. They are sent only through the local child-process stream, encrypted immediately, and excluded from configuration files, logs, and errors.
 
-## Checklist verifier ablation
+## Checklist and retry verifier
 
-The optional semantic checklist and retry verifier can be enabled in a CLI YAML config. `full` preserves the validator's existing history and browser-state context; `compact` sends only the original task, cumulative checklist, and exact candidate result. Keep every other setting identical when comparing the two modes.
+Semantic checklist generation and retry verification are enabled by default. The verifier receives the full validator history and browser-state context, may reject a candidate up to three times, and returns its feedback to the executor so the task can continue. Equivalent explicit settings are:
 
 ```yaml
 feature_flags:
   task_checklist: true
 
-stage_llms:
-  createChecklist:
-    provider: google
-    model: gemini-3-flash-preview
-    reasoning_effort: low
-
 validator_lifecycle:
   mode: retry
   max_failures: 3
-  context: full # change only this value to compact for the paired ablation
+  context: full
 ```
 
-If `stage_llms.createChecklist` is omitted, it inherits `stage_llms.createPlan`. Checklist generation runs in parallel with plan generation. The retry verifier can reopen or add checklist requirements after a rejected candidate; normal terminal validation retains its legacy prompt and context contract.
+If `stage_llms.createChecklist` is omitted, it inherits `stage_llms.createPlan`. Checklist generation runs in parallel with plan generation. Set `feature_flags.task_checklist: false` to disable it. Set `validator_lifecycle.mode: terminal` to restore one-shot terminal validation; `context: compact` remains available for ablations.
 
 ## License
 

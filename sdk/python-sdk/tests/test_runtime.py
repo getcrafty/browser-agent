@@ -43,6 +43,10 @@ class ConfigTests(unittest.TestCase):
             config = json.loads(Path(files.config_path).read_text())
             self.assertEqual(config["endpoint_url"], "https://example.com/v1")
             self.assertEqual(config["executable_path"], str(Path("chrome").resolve()))
+            self.assertEqual(
+                config["validator_lifecycle"],
+                {"mode": "retry", "max_failures": 3, "context": "full"},
+            )
             files.cleanup()
             files.cleanup()
             self.assertFalse(Path(runtime_directory).exists())

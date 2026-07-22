@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, it } from "mocha";
 import { createMockCoreDeps } from "./helpers/core-deps-fixtures.js";
 import { runTrainingRollout } from "../src/core/training-rollout.js";
 import { setRuntimeOptions } from "../src/runtime-options.js";
-import { setConfigFeatureFlags } from "../src/config-feature-flags.js";
+import {
+	configFeatureFlags,
+	setConfigFeatureFlags,
+} from "../src/config-feature-flags.js";
 
 describe("runTrainingRollout", () => {
 	beforeEach(() => {
@@ -181,6 +184,7 @@ describe("runTrainingRollout", () => {
 			dataExtraction: { provider: "openai", model: "gpt-test" },
 			featureFlags: deps.featureFlags,
 			maxSteps: 2,
+			validatorLifecycle: { mode: "terminal", maxFailures: 3 },
 			generateStep: async () => ({
 				data: {
 					thinking: "Return the result",
@@ -207,7 +211,7 @@ describe("runTrainingRollout", () => {
 		);
 	});
 
-	it("continues with bounded validator feedback and accepts a corrected result", async () => {
+	it("uses default retry verification and accepts a corrected result", async () => {
 		let resultCalls = 0;
 		let verificationCalls = 0;
 		let secondPromptPayload: Record<string, unknown> | undefined;
@@ -270,7 +274,6 @@ describe("runTrainingRollout", () => {
 			dataExtraction: { provider: "openai", model: "gpt-test" },
 			featureFlags: deps.featureFlags,
 			maxSteps: 3,
-			validatorLifecycle: { mode: "retry", maxFailures: 3 },
 			generateStep: async ({ stepNumber, promptPayload }) => {
 				if (stepNumber === 2) secondPromptPayload = promptPayload;
 				return {
@@ -310,6 +313,7 @@ describe("runTrainingRollout", () => {
 	});
 
 	it("reopens cumulative checklist items and forwards the configured verifier context", async () => {
+		const originalTaskChecklist = configFeatureFlags.taskChecklist;
 		setConfigFeatureFlags({ taskChecklist: true });
 		try {
 			let verificationCalls = 0;
@@ -402,7 +406,7 @@ describe("runTrainingRollout", () => {
 			assert.equal(verificationInputs[0].purpose, "completion_verifier");
 			assert.equal(verificationInputs[0].contextMode, "compact");
 		} finally {
-			setConfigFeatureFlags({ taskChecklist: false });
+			setConfigFeatureFlags({ taskChecklist: originalTaskChecklist });
 		}
 	});
 

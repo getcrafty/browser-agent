@@ -264,7 +264,9 @@ def create_runtime_files(options: ResolvedOptions, tasks: list[BrowserAgentTask]
             "download_dir": options.download_directory, "file_workspace_root": workspace,
             "max_steps": options.max_steps, "concurrency": options.concurrency,
             "task_runs": options.runs_per_task, "task_run_retry_count": options.retry_count,
-            "validator_lifecycle": {"mode": "terminal", "max_failures": 3},
+            "validator_lifecycle": {
+                "mode": "retry", "max_failures": 3, "context": "full"
+            },
             "wait_between_tasks_ms": 0, "save_steps_context": True, "save_task_logs": False,
             "step_messages_jsonl_path": str(Path(runtime) / "steps.jsonl"),
             "tasks": [{"task": task.task, **({"url": task.url} if task.url else {})}

@@ -1058,7 +1058,7 @@ export function loadConfig(configPath: string): Config {
 				]),
 				fullPath,
 				"feature_flags.task_checklist",
-			) ?? false,
+			) ?? true,
 		preStepScreenshotInLatestUserPrompt:
 			parseBooleanConfigValue(
 				pickFirstDefined(featureFlagsSource, [
@@ -1274,7 +1274,7 @@ export function loadConfig(configPath: string): Config {
 		"validatorLifecycle",
 	]);
 	let validatorLifecycle: ValidatorLifecycleOptions = {
-		mode: "terminal",
+		mode: "retry",
 		maxFailures: 3,
 		context: "full",
 	};

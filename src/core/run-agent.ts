@@ -75,7 +75,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 const DEFAULT_VALIDATOR_LIFECYCLE: ValidatorLifecycleOptions = {
-	mode: "terminal",
+	mode: "retry",
 	maxFailures: 3,
 	context: "full",
 };

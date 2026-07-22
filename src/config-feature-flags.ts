@@ -24,7 +24,7 @@ export interface ConfigFeatureFlags {
 }
 
 export const configFeatureFlags: ConfigFeatureFlags = {
-	taskChecklist: false,
+	taskChecklist: true,
 	preStepScreenshotInLatestUserPrompt: true,
 	userTakeoverTool: true,
 	authTakeover: false,

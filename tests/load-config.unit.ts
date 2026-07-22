@@ -185,7 +185,7 @@ tasks:
 			endpointUrl: undefined,
 		});
 		assert.deepEqual(config.featureFlags, {
-			taskChecklist: false,
+			taskChecklist: true,
 			preStepScreenshotInLatestUserPrompt: false,
 			userTakeoverTool: true,
 			authTakeover: false,
@@ -196,6 +196,11 @@ tasks:
 			websiteAPIficationTools: false,
 			optimizeExecutorStepDelays: false,
 			optimizeTextInput: false,
+		});
+		assert.deepEqual(config.validatorLifecycle, {
+			mode: "retry",
+			maxFailures: 3,
+			context: "full",
 		});
 	});
 
@@ -251,7 +256,7 @@ tasks:
 			endpointUrl: undefined,
 		});
 		assert.deepEqual(config.featureFlags, {
-			taskChecklist: false,
+			taskChecklist: true,
 			preStepScreenshotInLatestUserPrompt: false,
 			userTakeoverTool: true,
 			authTakeover: false,
@@ -689,6 +694,7 @@ stage_llms:
     provider: openai
     model: gpt-5.2
 feature_flags:
+  task_checklist: false
   pre_step_screenshot_in_latest_user_prompt: true
   user_takeover_tool: false
   auth_takeover: true
