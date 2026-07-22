@@ -22,7 +22,7 @@ describe("preprocess task checklist", () => {
 		featureFlags.enablePlanning = originalPlanning;
 	});
 
-	it("runs createPlan and createChecklist concurrently from the same DOM", async () => {
+	it("runs DOM-aware planning and task-only checklist creation concurrently", async () => {
 		featureFlags.enablePlanning = true;
 		const planStarted = deferred();
 		const checklistStarted = deferred();
@@ -38,8 +38,8 @@ describe("preprocess task checklist", () => {
 				await checklistStarted.promise;
 				return { steps: ["Navigate"] };
 			},
-			createChecklist: async (_task, dom) => {
-				assert.include(dom, "hello");
+			createChecklist: async (task) => {
+				assert.equal(task, "Return every requested field");
 				checklistStarted.resolve();
 				await planStarted.promise;
 				return { items: ["Return every requested field."] };

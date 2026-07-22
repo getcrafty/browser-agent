@@ -526,15 +526,12 @@ async function regenerateChecklistAfterVerification(params: {
 	deps: CoreDeps;
 	input: RunAgentInput;
 	session: BrowserSession;
-	dom: string;
-	currentUrl: string;
 	verification: NonNullable<RunAgentResult["successVerification"]>;
 	stepNumber: number;
 }): Promise<void> {
 	try {
 		const raw = await params.deps.createChecklist(
 			params.input.task,
-			params.dom,
 			params.input.stageLLMs.createChecklist ??
 				params.input.stageLLMs.createPlan,
 			{
@@ -545,7 +542,6 @@ async function regenerateChecklistAfterVerification(params: {
 				},
 			},
 			{
-				currentUrl: params.currentUrl,
 				existingChecklist: params.session.activeChecklist,
 				verifierSummary: params.verification.summary,
 			},
@@ -1314,17 +1310,6 @@ export async function runAgent(
 									deps,
 									input,
 									session,
-									dom:
-										typeof promptResult.prompt.payload.html ===
-										"string"
-											? promptResult.prompt.payload.html
-											: "",
-									currentUrl:
-										typeof promptResult.prompt.payload
-											.currentURL === "string"
-											? promptResult.prompt.payload
-													.currentURL
-											: "",
 									verification:
 										processResult.successVerification,
 									stepNumber,

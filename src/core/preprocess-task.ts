@@ -160,8 +160,6 @@ async function createPlanWithRetry(params: {
 async function createChecklistWithRetry(params: {
 	deps: CoreDeps;
 	input: PreprocessTaskInput;
-	dom: string;
-	currentUrl: string;
 }): Promise<ChecklistItem[]> {
 	let lastError: Error | null = null;
 	for (
@@ -177,14 +175,12 @@ async function createChecklistWithRetry(params: {
 				run: async () =>
 					await params.deps.createChecklist(
 						params.input.userTask,
-						params.dom,
 						params.input.stageLLMs.createChecklist ??
 							params.input.stageLLMs.createPlan,
 						{
 							onTrace: params.input.recordModelInvocation,
 							meta: { checklistAttempt: attempt, phase: "initial_checklist" },
 						},
-						{ currentUrl: params.currentUrl },
 					),
 			});
 			const normalized = normalizeChecklistDraft(raw);
@@ -297,8 +293,6 @@ export async function preprocessTask(
 		? createChecklistWithRetry({
 				deps,
 				input,
-				dom: planningDom,
-				currentUrl: targetURL,
 			})
 		: Promise.resolve([] as ChecklistItem[]);
 	const [plan, checklist] = await Promise.all([

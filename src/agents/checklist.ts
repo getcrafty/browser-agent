@@ -15,7 +15,6 @@ Rules:
 - The original task is authoritative. Do not add requirements from external knowledge.
 - Preserve every requested entity, field, count, range, date, unit, filter, ordering, negation, and output-format constraint.
 - Preserve words such as all, each, exactly, at least, only, before, and after.
-- Use the current page only to clarify task-relevant form or result fields. Do not turn unrelated page content into requirements.
 - Do not include procedural steps such as opening a page, clicking, scrolling, or searching.
 - Combine closely related constraints into one concise sentence when doing so does not hide a deliverable.
 - Return at most 12 checklist items. Each item must be one non-empty sentence.
@@ -31,7 +30,6 @@ export interface CreateChecklistTraceOptions {
 }
 
 export interface CreateChecklistRuntimeContext {
-	currentUrl?: string;
 	existingChecklist?: Array<{
 		id: string;
 		requirement: string;
@@ -42,7 +40,6 @@ export interface CreateChecklistRuntimeContext {
 
 export async function createChecklist(
 	task: string,
-	dom: string,
 	options: LLMOptions,
 	traceOptions?: CreateChecklistTraceOptions,
 	runtimeContext?: CreateChecklistRuntimeContext,
@@ -52,9 +49,6 @@ export async function createChecklist(
 		userMessage(
 			[
 				`Task: ${task}`,
-				runtimeContext?.currentUrl
-					? `Current URL: ${runtimeContext.currentUrl}`
-					: "",
 				runtimeContext?.existingChecklist?.length
 					? `Existing checklist to revise:\n${runtimeContext.existingChecklist
 							.map(
@@ -66,7 +60,6 @@ export async function createChecklist(
 				runtimeContext?.verifierSummary
 					? `Verifier correction: ${runtimeContext.verifierSummary}`
 					: "",
-				`Current page HTML:\n${dom}`,
 			]
 				.filter(Boolean)
 				.join("\n\n"),
