@@ -5,6 +5,10 @@ import {
 	normalizeActionListWithDiagnostics,
 	normalizeShorthandActionEntry,
 } from "../src/agents/executor-utils/action-normalization.js";
+import {
+	configFeatureFlags,
+	setConfigFeatureFlags,
+} from "../src/config-feature-flags.js";
 
 describe("action-normalization dropdown_select", () => {
 	it("accepts typed dropdown_select", () => {
@@ -187,6 +191,28 @@ describe("action-normalization memory_clear", () => {
 });
 
 describe("action-normalization extract_data", () => {
+	it("accepts bare extract_data only for whole-context extraction", () => {
+		const original = configFeatureFlags.extractDataWholeContext;
+		try {
+			setConfigFeatureFlags({ extractDataWholeContext: false });
+			assert.isNull(normalizeShorthandActionEntry("extract_data"));
+			assert.isNull(
+				normalizeShorthandActionEntry({ type: "extract_data" }),
+			);
+
+			setConfigFeatureFlags({ extractDataWholeContext: true });
+			assert.deepEqual(normalizeShorthandActionEntry("extract_data"), {
+				type: "extract_data",
+			});
+			assert.deepEqual(
+				normalizeShorthandActionEntry({ type: "extract_data" }),
+				{ type: "extract_data" },
+			);
+		} finally {
+			setConfigFeatureFlags({ extractDataWholeContext: original });
+		}
+	});
+
 	it("accepts and canonicalizes extract_data roots", () => {
 		const parsed = normalizeShorthandActionEntry({
 			type: "extract_data",

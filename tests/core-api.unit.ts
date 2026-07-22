@@ -44,12 +44,16 @@ describe("core-api", () => {
 	const originalEnablePlanning = featureFlags.enablePlanning;
 	const originalWebsiteAPIficationTools =
 		configFeatureFlags.websiteAPIficationTools;
+	const originalExtractDataWholeContext =
+		configFeatureFlags.extractDataWholeContext;
 
 	afterEach(() => {
 		featureFlags.incrementalDomContext = originalIncrementalDomContext;
 		featureFlags.enablePlanning = originalEnablePlanning;
 		configFeatureFlags.websiteAPIficationTools =
 			originalWebsiteAPIficationTools;
+		configFeatureFlags.extractDataWholeContext =
+			originalExtractDataWholeContext;
 		__setProviderOverrideForTests("vllm", null);
 		__setProviderOverrideForTests("together", null);
 	});
@@ -2518,6 +2522,68 @@ describe("core-api", () => {
 				summary: secondMarkdown,
 			},
 		]);
+	});
+
+	it("uses rootless whole-context extraction with full hrefs in the extraction snapshot", async () => {
+		setConfigFeatureFlags({ extractDataWholeContext: true });
+		const domOptions: Array<
+			| import("../src/browser/simplify-dom.js").SimplifyDomOptions
+			| undefined
+		> = [];
+		let executionDom: string | undefined;
+		const deps = createMockCoreDeps({
+			getSimplifiedDOM: async (_browser, options) => {
+				domOptions.push(options);
+				return 'main: Results\n  bid="a" href="/product": Product';
+			},
+			executeActions: async (params) => {
+				executionDom = params.simplifiedDom;
+				return {
+					pendingMemoryRead: false,
+					interactionErrors: [],
+					pendingPlanRegeneration: false,
+					screenshotToolObservations: [],
+					screenshotToolCaptures: [],
+				};
+			},
+		});
+		await createSession(deps, { port: 9229, headless: true });
+
+		const prompt = await createPromptForStep(deps, {
+			port: 9229,
+			userTask: "Extract the product",
+			stepsHistory: [],
+		});
+		assert.isTrue(
+			domOptions.some(
+				(options) =>
+					options?.includeNonClickableIds === false &&
+					options.omitHrefs === true,
+			),
+		);
+
+		await processModelOutputAndBrowse(deps, 9229, {
+			rawStepOutput: {
+				thinking: "Extract the page",
+				actions: [{ type: "extract_data" }],
+				done: false,
+			},
+			promptPayload: prompt.prompt.payload,
+			stepsHistory: [],
+		});
+
+		assert.strictEqual(
+			executionDom,
+			'main: Results\n  bid="a" href="/product": Product',
+		);
+		assert.isTrue(
+			domOptions.some(
+				(options) =>
+					options?.includeNonClickableIds === false &&
+					options.preserveFullHrefs === true &&
+					options.omitHrefs === false,
+			),
+		);
 	});
 
 	it("runAgent reserves the final allowed step for return_results-only finalization", async () => {

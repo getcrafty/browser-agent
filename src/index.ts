@@ -458,6 +458,15 @@ export async function main(
 				model: stageOptions.createPlan.model,
 				reasoningEffort: stageOptions.createPlan.reasoningEffort,
 			},
+			createChecklist: {
+				provider: (stageOptions.createChecklist ?? stageOptions.createPlan)
+					.provider,
+				model: (stageOptions.createChecklist ?? stageOptions.createPlan)
+					.model,
+				reasoningEffort: (
+					stageOptions.createChecklist ?? stageOptions.createPlan
+				).reasoningEffort,
+			},
 			preExecutionDomPruning: {
 				provider: stageOptions.preExecutionDomPruning.provider,
 				model: stageOptions.preExecutionDomPruning.model,

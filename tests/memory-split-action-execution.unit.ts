@@ -6,6 +6,10 @@ import yaml from "js-yaml";
 import { describe, it } from "mocha";
 import { executeActions } from "../src/agents/executor-utils/action-execution.js";
 import { DataExtractionCoordinator } from "../src/agents/executor-utils/data-extraction-coordinator.js";
+import {
+	configFeatureFlags,
+	setConfigFeatureFlags,
+} from "../src/config-feature-flags.js";
 
 function deferred<T = void>(): {
 	promise: Promise<T>;
@@ -36,6 +40,61 @@ function createMemoryFiles(prefix: string): {
 }
 
 describe("memory split action execution", () => {
+	it("passes the entire DOM for rootless whole-context extraction", async () => {
+		const files = createMemoryFiles("memory-whole-document-");
+		const original = configFeatureFlags.extractDataWholeContext;
+		const wholeDom = [
+			'div: "Header"',
+			'  bid="1" href="/one": "First"',
+			'div: "Footer"',
+		].join("\n");
+		let observedSimplifiedDom: string | undefined;
+		let observedTraceMeta: Record<string, unknown> | undefined;
+		try {
+			setConfigFeatureFlags({ extractDataWholeContext: true });
+			await executeActions({
+				b: {} as never,
+				actions: [{ type: "extract_data" }],
+				openTabs: [],
+				memoryFile: files.memoryFile,
+				extractDataMemoryFile: files.extractDataMemoryFile,
+				stepNumber: 4,
+				currentUrl: "https://example.com/current",
+				simplifiedDom: wholeDom,
+				dataExtractionLLMOptions: {
+					provider: "openai",
+					model: "gpt-test",
+					reasoningEffort: "none",
+				},
+				extractDataResultsFromSnapshot: async ({
+					simplifiedDom,
+					traceOptions,
+				}) => {
+					observedSimplifiedDom = simplifiedDom;
+					observedTraceMeta = traceOptions?.meta;
+					return {
+						items: [
+							{
+								link: "https://example.com/one",
+								summary: "whole document result",
+							},
+						],
+					};
+				},
+			});
+
+			assert.strictEqual(observedSimplifiedDom, wholeDom);
+			assert.deepEqual(observedTraceMeta, {
+				step: 4,
+				currentUrl: "https://example.com/current",
+				scope: "whole_document",
+			});
+		} finally {
+			setConfigFeatureFlags({ extractDataWholeContext: original });
+			fs.rmSync(files.dir, { recursive: true, force: true });
+		}
+	});
+
 	it("passes one identifier-free region with task, URL, and trace metadata", async () => {
 		const files = createMemoryFiles("memory-region-");
 		let observedSimplifiedDom: string | undefined;
@@ -104,6 +163,7 @@ describe("memory split action execution", () => {
 			assert.deepEqual(observedTraceMeta, {
 				step: 7,
 				currentUrl: "https://example.com/current",
+				scope: "rooted_subtree",
 				root: "!root",
 			});
 		} finally {

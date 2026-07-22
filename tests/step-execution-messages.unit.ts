@@ -17,6 +17,10 @@ import { PREPARED_MEMORY_CONTEXT_HINT } from "../src/agents/planner.js";
 import { close, launch, navigate } from "../src/browser/index.js";
 import type { Browser } from "../src/browser/types.js";
 import { featureFlags } from "../src/featureFlags.js";
+import {
+	configFeatureFlags,
+	setConfigFeatureFlags,
+} from "../src/config-feature-flags.js";
 import type {
 	Message,
 	ScreenshotToolObservation,
@@ -68,6 +72,19 @@ describe("step-execution-messages", () => {
 				},
 			],
 		);
+	});
+
+	it("serializes whole-context extraction as a bare tool", () => {
+		const original = configFeatureFlags.extractDataWholeContext;
+		try {
+			setConfigFeatureFlags({ extractDataWholeContext: true });
+			assert.deepEqual(
+				serializeActionsForPrompt([{ type: "extract_data" }]),
+				["extract_data"],
+			);
+		} finally {
+			setConfigFeatureFlags({ extractDataWholeContext: original });
+		}
 	});
 
 	it("preserves explicit return_results items in trajectory messages", () => {

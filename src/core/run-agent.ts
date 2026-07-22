@@ -36,6 +36,12 @@ import {
 	type PlanProgressStatus,
 	type StepExecutionSnapshot,
 } from "./run-agent-loop-state.js";
+import {
+	applyVerifierChecklistChanges,
+	cloneChecklist,
+	normalizeChecklistDraft,
+	replaceChecklistPreservingDone,
+} from "./checklist-state.js";
 import { closeSession, createSession } from "./session.js";
 import { preprocessTask } from "./preprocess-task.js";
 import { processModelStepOutput } from "./process-model-step-output.js";
@@ -71,6 +77,7 @@ function sleep(ms: number): Promise<void> {
 const DEFAULT_VALIDATOR_LIFECYCLE: ValidatorLifecycleOptions = {
 	mode: "terminal",
 	maxFailures: 3,
+	context: "full",
 };
 
 function resolveValidatorLifecycle(
@@ -87,7 +94,14 @@ function resolveValidatorLifecycle(
 			"validatorLifecycle must use mode terminal|retry and maxFailures between 1 and 3.",
 		);
 	}
-	return value;
+	if (
+		value.context !== undefined &&
+		value.context !== "full" &&
+		value.context !== "compact"
+	) {
+		throw new Error("validatorLifecycle context must use full|compact.");
+	}
+	return { ...value, context: value.context ?? "full" };
 }
 
 function truncateFeedbackText(value: string, maxChars: number): string {
@@ -100,6 +114,8 @@ function buildValidatorFeedback(params: {
 	failure: number;
 	maxFailures: number;
 	verification: NonNullable<RunAgentResult["successVerification"]>;
+	reopenChecklistItemIds?: string[];
+	addedChecklistItemIds?: string[];
 }): ValidatorFeedback {
 	return {
 		failure: params.failure,
@@ -109,7 +125,9 @@ function buildValidatorFeedback(params: {
 			.slice(0, 3)
 			.map((reason) => truncateFeedbackText(reason, 400)),
 		instruction:
-			"The validator rejected the attempted final result. Continue the task, address each concrete issue using browser or file evidence, then return a corrected result. Do not merely restate the rejected answer.",
+			"The completion verifier rejected the attempted final result. Continue the task, correct the specific missing or wrong result content, then return a complete corrected result. Do not merely restate the rejected answer.",
+		reopenChecklistItemIds: params.reopenChecklistItemIds,
+		addedChecklistItemIds: params.addedChecklistItemIds,
 	};
 }
 
@@ -504,8 +522,55 @@ async function replanFromCurrentDom(params: {
 	);
 }
 
+async function regenerateChecklistAfterVerification(params: {
+	deps: CoreDeps;
+	input: RunAgentInput;
+	session: BrowserSession;
+	dom: string;
+	currentUrl: string;
+	verification: NonNullable<RunAgentResult["successVerification"]>;
+	stepNumber: number;
+}): Promise<void> {
+	try {
+		const raw = await params.deps.createChecklist(
+			params.input.task,
+			params.dom,
+			params.input.stageLLMs.createChecklist ??
+				params.input.stageLLMs.createPlan,
+			{
+				onTrace: params.input.recordModelInvocation,
+				meta: {
+					phase: "verifier_regeneration",
+					stepNumber: params.stepNumber,
+				},
+			},
+			{
+				currentUrl: params.currentUrl,
+				existingChecklist: params.session.activeChecklist,
+				verifierSummary: params.verification.summary,
+			},
+		);
+		const normalized = normalizeChecklistDraft(raw);
+		if (!normalized) {
+			console.warn(
+				"[runAgent] verifier-requested checklist regeneration returned an invalid checklist; keeping the existing checklist",
+			);
+			return;
+		}
+		params.session.activeChecklist = replaceChecklistPreservingDone(
+			params.session.activeChecklist,
+			normalized.items,
+		);
+	} catch (error) {
+		console.warn(
+			`[runAgent] verifier-requested checklist regeneration failed; keeping the existing checklist: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
 interface SessionSnapshot {
 	activePlan: string[];
+	activeChecklist: BrowserSession["activeChecklist"];
 	planStatuses: PlanProgressStatus[];
 	keepPlanInHistory: boolean;
 	recentExecutions: StepExecutionSnapshot[];
@@ -542,6 +607,7 @@ function cloneDownloadedFileSignatures(
 function snapshotSession(session: BrowserSession): SessionSnapshot {
 	return {
 		activePlan: [...session.activePlan],
+		activeChecklist: cloneChecklist(session.activeChecklist),
 		planStatuses: [...session.planStatuses],
 		keepPlanInHistory: session.keepPlanInHistory,
 		recentExecutions: session.recentExecutions.map((entry) => ({
@@ -603,6 +669,7 @@ async function restoreSession(
 	snapshot: SessionSnapshot,
 ): Promise<void> {
 	session.activePlan = [...snapshot.activePlan];
+	session.activeChecklist = cloneChecklist(snapshot.activeChecklist);
 	session.planStatuses = [...snapshot.planStatuses];
 	session.keepPlanInHistory = snapshot.keepPlanInHistory;
 	session.recentExecutions = snapshot.recentExecutions.map((entry) => ({
@@ -1077,6 +1144,14 @@ export async function runAgent(
 												session.activePlan.length,
 											sessionPlanStatuses:
 												session.planStatuses,
+											sessionChecklist:
+												session.activeChecklist,
+											verificationPurpose:
+												validatorLifecycle.mode === "retry"
+													? "completion_verifier"
+													: "terminal_judge",
+											validatorContext:
+												validatorLifecycle.context ?? "full",
 											allowFatalActionErrors: true,
 											autoSwitchToNewTab:
 												input.autoSwitchToNewTab,
@@ -1230,10 +1305,53 @@ export async function runAgent(
 							continueAfterRejection &&
 							processResult.successVerification
 						) {
+							if (
+								deps.featureFlags.taskChecklist &&
+								processResult.successVerification
+									.regenerateChecklist
+							) {
+								await regenerateChecklistAfterVerification({
+									deps,
+									input,
+									session,
+									dom:
+										typeof promptResult.prompt.payload.html ===
+										"string"
+											? promptResult.prompt.payload.html
+											: "",
+									currentUrl:
+										typeof promptResult.prompt.payload
+											.currentURL === "string"
+											? promptResult.prompt.payload
+													.currentURL
+											: "",
+									verification:
+										processResult.successVerification,
+									stepNumber,
+								});
+							}
+							const checklistChanges =
+								deps.featureFlags.taskChecklist
+									? applyVerifierChecklistChanges({
+											items: session.activeChecklist,
+											reopenIds:
+												processResult.successVerification
+													.regenerateChecklist
+													? undefined
+													: processResult.successVerification
+															.reopenChecklistItemIds,
+											addRequirements:
+												processResult.successVerification
+													.addChecklistItems,
+										})
+									: { reopenedIds: [], addedIds: [] };
 							pendingValidatorFeedback = buildValidatorFeedback({
 								failure: validatorFailureCount,
 								maxFailures: validatorLifecycle.maxFailures,
 								verification: processResult.successVerification,
+								reopenChecklistItemIds:
+									checklistChanges.reopenedIds,
+								addedChecklistItemIds: checklistChanges.addedIds,
 							});
 							console.warn(
 								`[runAgent] validator rejected result (${validatorFailureCount}/${validatorLifecycle.maxFailures}); continuing with feedback`,

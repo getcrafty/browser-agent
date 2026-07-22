@@ -19,6 +19,7 @@ import {
 import { extractDataResultsFromSnapshot } from "../agents/data-extraction.js";
 import { extractValidBids } from "../agents/extract-valid-bids.js";
 import { findTargetURL, createPlan } from "../agents/planner.js";
+import { createChecklist } from "../agents/checklist.js";
 import { dismissCookieBanner } from "../agents/cookie.js";
 import { choosePreExecutionDomNonClickableIdsToExclude } from "../agents/pre-execution-dom-pruning.js";
 import { getExecutorSystem } from "../agents/prompts.js";
@@ -130,6 +131,7 @@ export function createDefaultCoreDeps(
 		findTargetURL,
 		dismissCookieBanner,
 		createPlan,
+		createChecklist,
 		choosePreExecutionDomNonClickableIdsToExclude,
 		pruneLiveDomByIdentifiers,
 		buildStepPayload,

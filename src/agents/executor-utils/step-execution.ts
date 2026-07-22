@@ -219,6 +219,7 @@ function getMemoryAvailableHint(): string {
 export function buildStepPayload(params: {
 	task: string;
 	planForPayload: string[];
+	checklistForPayload?: string[];
 	url: string;
 	previousInteractionErrors: string[];
 	previousToolObservations?: string[];
@@ -279,6 +280,9 @@ export function buildStepPayload(params: {
 	}
 	if (featureFlags.enablePlanning) {
 		payload.plan = params.planForPayload;
+	}
+	if (configFeatureFlags.taskChecklist) {
+		payload.checklist = params.checklistForPayload ?? [];
 	}
 	if (hasPinnedMemoryContent(params.pinnedMemoryContent)) {
 		payload.memoryAvailable = getMemoryAvailableHint();
@@ -652,7 +656,10 @@ export function serializeActionsForPrompt(
 			case "memory_clear":
 				return { memory_clear: action.target };
 			case "extract_data":
-				return { extract_data: action.root };
+				return configFeatureFlags.extractDataWholeContext ||
+					!action.root
+					? "extract_data"
+					: { extract_data: action.root };
 			case "agent_takeover":
 				return { agent_takeover: { request: action.request } };
 			case "website_tool":
@@ -672,6 +679,13 @@ export function formatStepForPrompt(step: StepResult): Record<string, unknown> {
 	const formatted: Record<string, unknown> = {};
 	if (featureFlags.enablePlanning) {
 		formatted.previousStepPlanUpdate = step.previousStepPlanUpdate;
+	}
+	if (
+		configFeatureFlags.taskChecklist &&
+		step.checklistUpdate &&
+		Object.keys(step.checklistUpdate).length > 0
+	) {
+		formatted.checklistUpdate = step.checklistUpdate;
 	}
 	formatted.previousStepStatus = step.previousStepStatus;
 	formatted.previousStepOutcome = step.previousStepOutcome;

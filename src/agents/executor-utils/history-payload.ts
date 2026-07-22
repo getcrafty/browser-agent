@@ -19,6 +19,7 @@ const PROMPT_ONLY_PAYLOAD_FIELDS = [
 	"memoryContent",
 	"websiteToolResults",
 	"authContext",
+	"checklist",
 ] as const;
 
 export function stripDomContextFromHistoryPayload(

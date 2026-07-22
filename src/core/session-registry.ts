@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import type { Browser, Tab } from "../browser/types.js";
 import type {
+	ChecklistItem,
 	ScreenshotToolCaptureCall,
 	ScreenshotToolObservation,
 } from "../agents/types.js";
@@ -27,6 +28,7 @@ export interface BrowserSession {
 	pinnedMemoryContent?: string;
 	preparedPasteFiles: string[];
 	activePlan: string[];
+	activeChecklist: ChecklistItem[];
 	planStatuses: PlanProgressStatus[];
 	keepPlanInHistory: boolean;
 	recentExecutions: StepExecutionSnapshot[];

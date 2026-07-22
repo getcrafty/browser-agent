@@ -32,6 +32,7 @@ function normalizeModelStep(raw: unknown): StepResult {
 		return {
 			thinking: "",
 			previousStepPlanUpdate: [],
+			checklistUpdate: undefined,
 			previousStepStatus: "none",
 			previousStepOutcome: "",
 			currentStateObservation: "",
@@ -52,6 +53,12 @@ function normalizeModelStep(raw: unknown): StepResult {
 		previousStepPlanUpdate: Array.isArray(raw.previousStepPlanUpdate)
 			? (raw.previousStepPlanUpdate as StepResult["previousStepPlanUpdate"])
 			: [],
+		checklistUpdate:
+			raw.checklistUpdate &&
+			typeof raw.checklistUpdate === "object" &&
+			!Array.isArray(raw.checklistUpdate)
+				? (raw.checklistUpdate as StepResult["checklistUpdate"])
+				: undefined,
 		previousStepStatus: normalizePreviousStepStatus(
 			raw.previousStepStatus ?? rawActionContext?.status,
 		),

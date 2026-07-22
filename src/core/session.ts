@@ -138,6 +138,7 @@ export async function createSession(
 		pinnedMemoryContent,
 		preparedPasteFiles,
 		activePlan: [],
+		activeChecklist: [],
 		planStatuses: [],
 		keepPlanInHistory: false,
 		recentExecutions: [],

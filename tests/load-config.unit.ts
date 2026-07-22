@@ -185,12 +185,14 @@ tasks:
 			endpointUrl: undefined,
 		});
 		assert.deepEqual(config.featureFlags, {
+			taskChecklist: false,
 			preStepScreenshotInLatestUserPrompt: false,
 			userTakeoverTool: true,
 			authTakeover: false,
 			agentTakeoverTool: false,
 			dismissCookieBanner: true,
 			preExecutionDomPruning: true,
+			extractDataWholeContext: false,
 			websiteAPIficationTools: false,
 			optimizeExecutorStepDelays: false,
 			optimizeTextInput: false,
@@ -249,12 +251,14 @@ tasks:
 			endpointUrl: undefined,
 		});
 		assert.deepEqual(config.featureFlags, {
+			taskChecklist: false,
 			preStepScreenshotInLatestUserPrompt: false,
 			userTakeoverTool: true,
 			authTakeover: false,
 			agentTakeoverTool: false,
 			dismissCookieBanner: true,
 			preExecutionDomPruning: true,
+			extractDataWholeContext: false,
 			websiteAPIficationTools: false,
 			optimizeExecutorStepDelays: false,
 			optimizeTextInput: false,
@@ -650,6 +654,7 @@ tasks:
 	});
 
 	it("parses YAML-backed feature flags without mutating runtime config flags", () => {
+		const originalTaskChecklist = configFeatureFlags.taskChecklist;
 		const originalPreStepScreenshot =
 			configFeatureFlags.preStepScreenshotInLatestUserPrompt;
 		const originalUserTakeover = configFeatureFlags.userTakeoverTool;
@@ -658,6 +663,8 @@ tasks:
 		const originalDismissCookieBanner = configFeatureFlags.dismissCookieBanner;
 		const originalPreExecutionDomPruning =
 			configFeatureFlags.preExecutionDomPruning;
+		const originalExtractDataWholeContext =
+			configFeatureFlags.extractDataWholeContext;
 		const originalWebsiteAPIficationTools =
 			configFeatureFlags.websiteAPIficationTools;
 		try {
@@ -688,6 +695,7 @@ feature_flags:
   agent_takeover_tool: true
   dismiss_cookie_banner: false
   pre_execution_dom_pruning: false
+  extract_data_whole_context: true
   website_apification_tools: true
   optimize_executor_step_delays: true
   optimize_text_input: true
@@ -699,28 +707,33 @@ tasks:
 			const config = loadConfig(configPath);
 
 			assert.deepEqual(config.featureFlags, {
+				taskChecklist: false,
 				preStepScreenshotInLatestUserPrompt: true,
 				userTakeoverTool: false,
 				authTakeover: true,
 				agentTakeoverTool: true,
 				dismissCookieBanner: false,
 				preExecutionDomPruning: false,
+				extractDataWholeContext: true,
 				websiteAPIficationTools: true,
 				optimizeExecutorStepDelays: true,
 				optimizeTextInput: true,
 			});
 			assert.deepEqual(configFeatureFlags, {
+				taskChecklist: originalTaskChecklist,
 				preStepScreenshotInLatestUserPrompt: originalPreStepScreenshot,
 				userTakeoverTool: originalUserTakeover,
 				authTakeover: originalAuthTakeover,
 				agentTakeoverTool: originalAgentTakeover,
 				dismissCookieBanner: originalDismissCookieBanner,
 				preExecutionDomPruning: originalPreExecutionDomPruning,
+				extractDataWholeContext: originalExtractDataWholeContext,
 				websiteAPIficationTools: originalWebsiteAPIficationTools,
 				optimizeExecutorStepDelays: false,
 				optimizeTextInput: false,
 			});
 		} finally {
+			configFeatureFlags.taskChecklist = originalTaskChecklist;
 			configFeatureFlags.preStepScreenshotInLatestUserPrompt =
 				originalPreStepScreenshot;
 			configFeatureFlags.userTakeoverTool = originalUserTakeover;
@@ -729,6 +742,8 @@ tasks:
 			configFeatureFlags.dismissCookieBanner = originalDismissCookieBanner;
 			configFeatureFlags.preExecutionDomPruning =
 				originalPreExecutionDomPruning;
+			configFeatureFlags.extractDataWholeContext =
+				originalExtractDataWholeContext;
 			configFeatureFlags.websiteAPIficationTools =
 				originalWebsiteAPIficationTools;
 		}
@@ -1087,6 +1102,7 @@ stage_llms:
 validator_lifecycle:
   mode: retry
   max_failures: 2
+  context: compact
 concurrency: 1
 tasks:
   - "test task"
@@ -1097,7 +1113,26 @@ tasks:
 		assert.deepEqual(config.validatorLifecycle, {
 			mode: "retry",
 			maxFailures: 2,
+			context: "compact",
 		});
+	});
+
+	it("parses task checklist and falls its stage back to createPlan", () => {
+		const configPath = writeTempConfig(`
+provider: openai
+model: gpt-5.2
+reasoning_effort: low
+stage_llms:
+  createPlan: { provider: openai, model: gpt-5.2, reasoning_effort: low }
+feature_flags:
+  task_checklist: true
+concurrency: 1
+tasks:
+  - "test task"
+`);
+		const config = loadConfig(configPath);
+		assert.isTrue(config.featureFlags.taskChecklist);
+		assert.deepEqual(config.stageLLMs.createChecklist, config.stageLLMs.createPlan);
 	});
 
 	it("rejects validator lifecycle limits above three", () => {
@@ -1599,6 +1634,7 @@ tasks:
 	});
 
 	it("createDefaultCoreDeps applies config feature flags to runtime state", () => {
+		const originalTaskChecklist = configFeatureFlags.taskChecklist;
 		const originalPreStepScreenshot =
 			configFeatureFlags.preStepScreenshotInLatestUserPrompt;
 		const originalUserTakeover = configFeatureFlags.userTakeoverTool;
@@ -1607,15 +1643,19 @@ tasks:
 		const originalDismissCookieBanner = configFeatureFlags.dismissCookieBanner;
 		const originalPreExecutionDomPruning =
 			configFeatureFlags.preExecutionDomPruning;
+		const originalExtractDataWholeContext =
+			configFeatureFlags.extractDataWholeContext;
 		try {
 			const deps = createDefaultCoreDeps({
 				featureFlags: {
+					taskChecklist: false,
 					preStepScreenshotInLatestUserPrompt: true,
 					userTakeoverTool: false,
 					authTakeover: true,
 					agentTakeoverTool: true,
 					dismissCookieBanner: false,
 					preExecutionDomPruning: false,
+					extractDataWholeContext: true,
 					websiteAPIficationTools: false,
 					optimizeExecutorStepDelays: false,
 					optimizeTextInput: false,
@@ -1623,18 +1663,21 @@ tasks:
 			});
 
 			assert.deepEqual(deps.featureFlags, {
+				taskChecklist: false,
 				preStepScreenshotInLatestUserPrompt: true,
 				userTakeoverTool: false,
 				authTakeover: true,
 				agentTakeoverTool: true,
 				dismissCookieBanner: false,
 				preExecutionDomPruning: false,
+				extractDataWholeContext: true,
 				websiteAPIficationTools: false,
 				optimizeExecutorStepDelays: false,
 				optimizeTextInput: false,
 			});
 			assert.deepEqual(configFeatureFlags, deps.featureFlags);
 		} finally {
+			configFeatureFlags.taskChecklist = originalTaskChecklist;
 			configFeatureFlags.preStepScreenshotInLatestUserPrompt =
 				originalPreStepScreenshot;
 			configFeatureFlags.userTakeoverTool = originalUserTakeover;
@@ -1643,6 +1686,8 @@ tasks:
 			configFeatureFlags.dismissCookieBanner = originalDismissCookieBanner;
 			configFeatureFlags.preExecutionDomPruning =
 				originalPreExecutionDomPruning;
+			configFeatureFlags.extractDataWholeContext =
+				originalExtractDataWholeContext;
 		}
 	});
 });

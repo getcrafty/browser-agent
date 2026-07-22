@@ -61,6 +61,9 @@ export interface SuccessVerificationVerdict {
 	success: boolean;
 	summary: string;
 	reasons: string[];
+	reopenChecklistItemIds?: string[];
+	addChecklistItems?: string[];
+	regenerateChecklist?: boolean;
 }
 
 export interface SuccessVerificationResult extends SuccessVerificationVerdict {
@@ -114,6 +117,21 @@ export interface Plan {
 	steps: string[];
 }
 
+export interface ChecklistDraft {
+	items: string[];
+}
+
+export type ChecklistStatus = "TODO" | "DONE" | "REGRESSED";
+
+export interface ChecklistItem {
+	id: string;
+	requirement: string;
+	status: ChecklistStatus;
+}
+
+export type ChecklistUpdateStatus = "done" | "regressed";
+export type ChecklistUpdate = Record<string, ChecklistUpdateStatus>;
+
 // Executor types
 export type PreviousStepStatus =
 	| "none"
@@ -127,6 +145,7 @@ export type PreviousStepStatus =
 export interface StepResult {
 	thinking: string;
 	previousStepPlanUpdate: PlanStepUpdate[];
+	checklistUpdate?: ChecklistUpdate;
 	previousStepStatus: PreviousStepStatus;
 	previousStepOutcome: string;
 	currentStateObservation: string;
@@ -169,7 +188,9 @@ export interface MainLoopStepEntry {
 	step: number;
 	messages: unknown[];
 	step_kind?:
-		"executor_step" | "auth_takeover_attempt" | "max_step_finalization";
+		| "executor_step"
+		| "auth_takeover_attempt"
+		| "max_step_finalization";
 	auth_takeover_attempt?: AuthTakeoverAttemptEvent;
 }
 
@@ -198,7 +219,7 @@ export type Action =
 	| { type: "read_file"; path: string }
 	| { type: "return_results"; results?: ExecutorResultItem[] }
 	| { type: "memory_clear"; target: "memory" | "memory_result" | "all" }
-	| { type: "extract_data"; root: string }
+	| { type: "extract_data"; root?: string }
 	| { type: "agent_takeover"; request: string }
 	| { type: "website_tool"; name: string; inputs: WebsiteToolInputs }
 	| { type: "regenerate_plan" };

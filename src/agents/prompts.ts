@@ -62,6 +62,18 @@ const PLAN_UPDATE_INSTRUCTIONS = `The "previousStepPlanUpdate" field MUST always
   - If the previous step tool calls were more finegrained than the steps defined in the plan.
 `;
 
+const CHECKLIST_PAYLOAD_DESCRIPTION = `- checklist: cumulative semantic completion requirements. Each item has a stable C-number and [TODO], [DONE], or [REGRESSED] status. Treat the latest checklist as the source of truth for what remains.`;
+
+const CHECKLIST_UPDATE_FORMAT_BLOCK = `checklistUpdate:
+  C1: "done"
+  C3: "regressed"
+`;
+
+const CHECKLIST_UPDATE_INSTRUCTIONS = `- checklistUpdate is optional. Omit it when no checklist status changed.
+- When present, map stable checklist IDs to only "done" or "regressed".
+- Mark an item done only after the current state shows its complete semantic requirement is satisfied. Do not mark partial progress done.
+- Before return_results, compare the proposed result with every checklist requirement and correct missing or wrong content.`;
+
 function isPlanningEnabled(): boolean {
 	return featureFlags.enablePlanning;
 }
@@ -118,10 +130,11 @@ function getResponseKeyOrder(): string {
 	const actionContextKeys =
 		"previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale";
 	const planUpdateKey = isPlanningEnabled() ? "previousStepPlanUpdate, " : "";
-	const thinkingKey = featureFlags.executorThinkingField
-		? "thinking, "
+	const checklistUpdateKey = configFeatureFlags.taskChecklist
+		? "checklistUpdate, "
 		: "";
-	return `${thinkingKey}${planUpdateKey}${actionContextKeys}, tools`;
+	const thinkingKey = featureFlags.executorThinkingField ? "thinking, " : "";
+	return `${thinkingKey}${planUpdateKey}${checklistUpdateKey}${actionContextKeys}, tools`;
 }
 
 function getPreStepScreenshotPayloadDescription(): string {
@@ -160,6 +173,24 @@ function getUserTakeoverActionInstructions(): string {
 - Do not use "user_takeover" for OTP, CAPTCHA, payment, or other manual verification flows when manual takeover is disabled.`;
 	}
 	return "";
+}
+
+function getExtractDataShorthandInstruction(): string {
+	return configFeatureFlags.extractDataWholeContext
+		? "  - extract_data: use the tool name only; the runtime sends the whole current document to the extractor"
+		: "  - extract_data: the double-quoted scalar value is one bid/ncid or a comma-separated list; extracted items are always written to memory_result";
+}
+
+function getExtractDataUsageInstructions(): string {
+	if (configFeatureFlags.extractDataWholeContext) {
+		return `  - Use the bare extract_data tool name with no argument.
+  - The runtime sends the entire current simplified DOM to the extractor in one call.
+  - Do not provide a root, bid, ncid, range, or nested object.`;
+	}
+	return `  - Provide one scalar string containing one existing bid or ncid handle, or a comma-separated list of them (for example, extract_data: "!a,42,!b").
+  - Select every relevant container in that one call; extraction parses all result items from the selected subtrees together.
+  - Root values must come from the current HTML. Never invent a bid or ncid, and never include an empty comma-separated segment.
+  - Do not provide a nested object or the removed "root", "items", "bid", "url_bid", "hierarchy", "write_to", "writeTo", "start", "end_exclusive", or "endExclusive" fields.`;
 }
 
 function getPruneToolSections(): string {
@@ -272,6 +303,7 @@ For the last step you executed, you receive a YAML payload with these fields:
 - task: the user's overall task
 - currentDateTime: the current runtime-local date and time, including the IANA time zone and expected display format
 ${isPlanningEnabled() ? PLAN_PAYLOAD_DESCRIPTION : ""}
+${configFeatureFlags.taskChecklist ? CHECKLIST_PAYLOAD_DESCRIPTION : ""}
 - currentURL: the URL of the current page
 - currentTab: zero-based index of the currently active tab in "openTabs"
 - openTabs: list of currently opened tab titles. Use zero-based indices from this list when calling "switch_tab".
@@ -316,6 +348,9 @@ function getExecutorSectionResponseFormat(
 	const planUpdateExampleBlock = isPlanningEnabled()
 		? "previousStepPlanUpdate: []\n"
 		: "";
+	const checklistUpdateExampleBlock = configFeatureFlags.taskChecklist
+		? CHECKLIST_UPDATE_FORMAT_BLOCK
+		: "";
 	const actionContextExampleBlock = getExecutorActionContextPreamble();
 	const regeneratePlanShorthandInstruction = isPlanningEnabled()
 		? "  - regenerate_plan: use the tool name only\n"
@@ -330,14 +365,14 @@ Respond with raw YAML enclosed by <yaml> and </yaml> tags. Everything between th
 
 Example response:
 <yaml>
-${planUpdateExampleBlock}${actionContextExampleBlock}tools:
+${planUpdateExampleBlock}${checklistUpdateExampleBlock}${actionContextExampleBlock}tools:
   - type: "5"
     text: "browser automation"
     enter: true
 </yaml>
 
 Rules:
-- All top level fields in the response are MANDATORY.
+- All displayed top-level fields are MANDATORY except checklistUpdate. Omit checklistUpdate when no checklist status changed.
 - The only normal way to complete the task is to call return_results using evidence from ${resultSourceRule}. The runtime transparently waits for pending extractions before memory_read and return_results execute; do not poll or add wait calls for extraction completion.
 ${actionContextRules}- Final result objects returned by return_results follow EXACTLY THIS FORMAT:
   - link: URL to the source page for that data item (mandatory).
@@ -360,7 +395,7 @@ ${actionContextRules}- Final result objects returned by return_results follow EX
   - read_file: use a map with a safe workspace-relative path or completed downloadedFiles path
   - return_results: use the tool name only to return completed extract_data memory unchanged, or provide a list of result objects when synthesizing from ${explicitResultExampleSource}
   - memory_clear: use "memory", "memory_result", or "all"
-  - extract_data: the double-quoted scalar value is one bid/ncid or a comma-separated list; extracted items are always written to memory_result
+${getExtractDataShorthandInstruction()}
 ${configFeatureFlags.agentTakeoverTool ? "  - agent_takeover: use a map with request\n" : ""}  - navigate: the URL follows the tool name
 ${getWebsiteToolShorthandInstruction(options)}
 ${regeneratePlanShorthandInstruction}
@@ -370,7 +405,7 @@ ${regeneratePlanShorthandInstruction}
 - TEXT FIELDS (${textLikeScalarFields}) MUST ALWAYS BE SURROUNDED BY DOUBLE QUOTES to avoid YAML parsing issues.
 - For "type" tool calls, "enter" is an optional boolean (default false). Set it true only when pressing Enter is clearly intended.
 - For input type="date", pass a canonical YYYY-MM-DD value; the runtime assigns and verifies it atomically.
-${planUpdateInstructions}When the task is complete, use return_results instead of writing a result yourself.`;
+${planUpdateInstructions}${configFeatureFlags.taskChecklist ? `${CHECKLIST_UPDATE_INSTRUCTIONS}\n` : ""}When the task is complete, use return_results instead of writing a result yourself.`;
 }
 
 function getExecutorSectionActions(
@@ -509,11 +544,8 @@ extract_data:
   - Use when page data is meant to become part of the final result. Use over memory_write for that purpose.
   - Launches data extraction asynchronously. The runtime captures the selected page content, starts background extraction, and continues with later actions and subsequent steps without waiting for it to finish.
   - Do not poll for completion or add wait calls. Call memory_read or return_results normally when needed; the runtime applies the required completion barrier transparently.
-  - Provide one scalar string containing one existing bid or ncid handle, or a comma-separated list of them (for example, extract_data: "!a,42,!b").
-  - Select every relevant container in that one call; extraction parses all result items from the selected subtrees together.
-  - Root values must come from the current HTML. Never invent a bid or ncid, and never include an empty comma-separated segment.
+${getExtractDataUsageInstructions()}
   - Extracted items are always written to memory_result.
-  - Do not provide a nested object or the removed "root", "items", "bid", "url_bid", "hierarchy", "write_to", "writeTo", "start", "end_exclusive", or "endExclusive" fields.
 
 ${
 	configFeatureFlags.agentTakeoverTool

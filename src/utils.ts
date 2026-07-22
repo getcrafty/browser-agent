@@ -57,6 +57,7 @@ export interface StageLLMOverrides {
 	findTargetURL?: StageLLMOverride;
 	dismissCookieBanner?: StageLLMOverride;
 	createPlan?: StageLLMOverride;
+	createChecklist?: StageLLMOverride;
 	preExecutionDomPruning?: StageLLMOverride;
 	runAgent?: StageLLMOverride;
 	dataExtraction?: StageLLMOverride;
@@ -67,6 +68,7 @@ export interface StageLLMOptions {
 	findTargetURL: LLMOptions;
 	dismissCookieBanner: LLMOptions;
 	createPlan: LLMOptions;
+	createChecklist: LLMOptions;
 	preExecutionDomPruning: LLMOptions;
 	runAgent: LLMOptions;
 	dataExtraction: LLMOptions;
@@ -120,6 +122,7 @@ const STAGE_KEYS: Record<StageLLMKey, string[]> = {
 	findTargetURL: ["findTargetURL", "find_target_url"],
 	dismissCookieBanner: ["dismissCookieBanner", "dismiss_cookie_banner"],
 	createPlan: ["createPlan", "create_plan"],
+	createChecklist: ["createChecklist", "create_checklist"],
 	preExecutionDomPruning: [
 		"preExecutionDomPruning",
 		"pre_execution_dom_pruning",
@@ -934,6 +937,13 @@ export function loadConfig(configPath: string): Config {
 		fullPath,
 		defaultLLM,
 	);
+	const createChecklistStageLLM = resolveStageLLMOptions(
+		"createChecklist",
+		stageOverridesSource,
+		raw,
+		fullPath,
+		createPlanStageLLM,
+	);
 	const stageLLMs: StageLLMOptions = {
 		findTargetURL: resolveStageLLMOptions(
 			"findTargetURL",
@@ -950,6 +960,7 @@ export function loadConfig(configPath: string): Config {
 			defaultLLM,
 		),
 		createPlan: createPlanStageLLM,
+		createChecklist: createChecklistStageLLM,
 		preExecutionDomPruning: resolveStageLLMOptions(
 			"preExecutionDomPruning",
 			stageOverridesSource,
@@ -1039,6 +1050,15 @@ export function loadConfig(configPath: string): Config {
 		}
 	}
 	const configuredFeatureFlags: ConfigFeatureFlags = {
+		taskChecklist:
+			parseBooleanConfigValue(
+				pickFirstDefined(featureFlagsSource, [
+					"task_checklist",
+					"taskChecklist",
+				]),
+				fullPath,
+				"feature_flags.task_checklist",
+			) ?? false,
 		preStepScreenshotInLatestUserPrompt:
 			parseBooleanConfigValue(
 				pickFirstDefined(featureFlagsSource, [
@@ -1093,6 +1113,15 @@ export function loadConfig(configPath: string): Config {
 				fullPath,
 				"feature_flags.pre_execution_dom_pruning",
 			) ?? true,
+		extractDataWholeContext:
+			parseBooleanConfigValue(
+				pickFirstDefined(featureFlagsSource, [
+					"extract_data_whole_context",
+					"extractDataWholeContext",
+				]),
+				fullPath,
+				"feature_flags.extract_data_whole_context",
+			) ?? false,
 		websiteAPIficationTools:
 			parseBooleanConfigValue(
 				pickFirstDefined(featureFlagsSource, [
@@ -1247,6 +1276,7 @@ export function loadConfig(configPath: string): Config {
 	let validatorLifecycle: ValidatorLifecycleOptions = {
 		mode: "terminal",
 		maxFailures: 3,
+		context: "full",
 	};
 	if (validatorLifecycleInput !== undefined) {
 		if (
@@ -1264,6 +1294,7 @@ export function loadConfig(configPath: string): Config {
 			"max_failures",
 			"maxFailures",
 		]);
+		const context = pickFirstDefined(lifecycle, ["context"]);
 		if (mode !== "terminal" && mode !== "retry") {
 			failConfig(
 				`Invalid validator_lifecycle.mode in config: ${fullPath}. Use terminal or retry.`,
@@ -1280,9 +1311,15 @@ export function loadConfig(configPath: string): Config {
 				`Invalid validator_lifecycle.max_failures in config: ${fullPath}. Use an integer from 1 to 3.`,
 			);
 		}
+		if (context !== undefined && context !== "full" && context !== "compact") {
+			failConfig(
+				`Invalid validator_lifecycle.context in config: ${fullPath}. Use full or compact.`,
+			);
+		}
 		validatorLifecycle = {
 			mode,
 			maxFailures: (maxFailures as number | undefined) ?? 3,
+			context: (context as "full" | "compact" | undefined) ?? "full",
 		};
 	}
 
