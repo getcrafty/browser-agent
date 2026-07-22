@@ -1302,8 +1302,7 @@ export async function processStepModelOutput(
 		step.done = false;
 		delete step.result;
 	}
-	const executorPromptOptions = { provider: input.executorProvider };
-	const assistant = formatStepForPrompt(step, executorPromptOptions);
+	const assistant = formatStepForPrompt(step);
 	const priorHistoryMessages = buildHistoryMessagesFromFullStepHistory(
 		input.stepsHistory,
 	);
@@ -1320,7 +1319,7 @@ export async function processStepModelOutput(
 			stepsHistory: input.stepsHistory,
 		}),
 		assistant,
-		...(shouldIncludeExecutorReasoningHistory(executorPromptOptions) &&
+		...(shouldIncludeExecutorReasoningHistory() &&
 		input.reasoningTokens?.trim()
 			? { reasoningTokens: input.reasoningTokens.trim() }
 			: {}),

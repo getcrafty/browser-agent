@@ -32,10 +32,7 @@ function isStepLikeRecord(value: unknown): value is Record<string, unknown> {
 	);
 }
 
-function toCanonicalAssistantContent(
-	assistant: unknown,
-	options: ExecutorPromptOptions,
-): string {
+function toCanonicalAssistantContent(assistant: unknown): string {
 	if (typeof assistant === "string") {
 		return assistant;
 	}
@@ -98,15 +95,14 @@ function toCanonicalAssistantContent(
 		step.result = yaml.dump(obj.result).trim();
 	}
 
-	return yaml.dump(formatStepForPrompt(step, options));
+	return yaml.dump(formatStepForPrompt(step));
 }
 
 function injectReasoningTrace(params: {
 	content: string;
 	reasoningTokens?: string;
-	options: ExecutorPromptOptions;
 }): string {
-	if (!shouldIncludeExecutorReasoningHistory(params.options)) {
+	if (!shouldIncludeExecutorReasoningHistory()) {
 		return params.content;
 	}
 	const reasoningTrace = params.reasoningTokens?.trim();
@@ -116,7 +112,7 @@ function injectReasoningTrace(params: {
 
 export function buildHistoryMessagesFromFullStepHistory(
 	stepsHistory: StepHistoryEntry[],
-	options: ExecutorPromptOptions = {},
+	_options: ExecutorPromptOptions = {},
 	historyOptions: {
 		omitDomContext?: boolean;
 	} = {},
@@ -136,9 +132,8 @@ export function buildHistoryMessagesFromFullStepHistory(
 		messages.push({
 			role: "assistant",
 			content: injectReasoningTrace({
-				content: toCanonicalAssistantContent(step.assistant, options),
+				content: toCanonicalAssistantContent(step.assistant),
 				reasoningTokens: step.reasoningTokens,
-				options,
 			}),
 		});
 	}

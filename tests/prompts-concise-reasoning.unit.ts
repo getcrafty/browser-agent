@@ -6,43 +6,29 @@ import {
 } from "../src/agents/prompts.js";
 import { featureFlags } from "../src/featureFlags.js";
 
-describe("executor reasoning prompt flags", () => {
-	const originalReasoningTraceContext =
-		featureFlags.executorReasoningTraceContext;
+describe("executor reasoning prompts", () => {
 	const originalEnableMiscInstruction = featureFlags.enableMiscInstruction;
 
 	afterEach(() => {
-		featureFlags.executorReasoningTraceContext = originalReasoningTraceContext;
 		featureFlags.enableMiscInstruction = originalEnableMiscInstruction;
 	});
 
-	it("replaces action-context fields with reasoning trace context for non-OpenAI executors", () => {
-		featureFlags.executorReasoningTraceContext = true;
+	it("keeps action-context fields for every executor provider", () => {
 		featureFlags.enableMiscInstruction = true;
-		const prompt = getExecutorSystem({ provider: "vllm" });
-
-		for (const field of [
-			"previousStepStatus",
-			"previousStepOutcome",
-			"currentStateObservation",
-			"nextActionRationale",
-		]) {
-			assert.notInclude(prompt, field);
-		}
-		assert.include(prompt, "<think>...</think>");
-		assert.include(prompt, "fallible reasoning");
-	});
-
-	it("keeps action-context fields for OpenAI and unknown providers", () => {
-		featureFlags.executorReasoningTraceContext = true;
 
 		for (const prompt of [
+			getExecutorSystem({ provider: "vllm" }),
 			getExecutorSystem({ provider: "openai" }),
 			getExecutorSystem(),
 		]) {
-			assert.include(prompt, "previousStepStatus");
-			assert.include(prompt, "nextActionRationale");
-			assert.notInclude(prompt, "fallible reasoning");
+			for (const field of [
+				"previousStepStatus",
+				"previousStepOutcome",
+				"currentStateObservation",
+				"nextActionRationale",
+			]) {
+				assert.include(prompt, field);
+			}
 		}
 	});
 

@@ -110,39 +110,15 @@ ${guidance.content}
 </ACTIVE_WEBSITE_TOOL_GUIDANCE>`;
 }
 
-export function shouldUseExecutorReasoningTraceContext(
-	options: ExecutorPromptOptions = {},
-): boolean {
-	return (
-		featureFlags.executorReasoningTraceContext &&
-		options.provider !== undefined &&
-		options.provider !== "openai"
-	);
+export function shouldIncludeExecutorReasoningHistory(): boolean {
+	return featureFlags.incrementalDomContext;
 }
 
-export function shouldIncludeExecutorReasoningHistory(
-	options: ExecutorPromptOptions = {},
-): boolean {
-	return (
-		featureFlags.incrementalDomContext ||
-		shouldUseExecutorReasoningTraceContext(options)
-	);
-}
-
-export function shouldEmitExecutorActionContextFields(
-	options: ExecutorPromptOptions = {},
-): boolean {
-	return !shouldUseExecutorReasoningTraceContext(options);
-}
-
-function getResponseKeyOrder(options: ExecutorPromptOptions = {}): string {
+function getResponseKeyOrder(): string {
 	const actionContextKeys =
 		"previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale";
 	const planUpdateKey = isPlanningEnabled() ? "previousStepPlanUpdate, " : "";
-	if (shouldEmitExecutorActionContextFields(options)) {
-		return `${planUpdateKey}${actionContextKeys}, tools`;
-	}
-	return `${planUpdateKey}tools`;
+	return `${planUpdateKey}${actionContextKeys}, tools`;
 }
 
 function getPreStepScreenshotPayloadDescription(): string {
@@ -221,11 +197,8 @@ function getIncrementalDomContextInstructions(): string {
 - An empty html value with htmlContextMode "diff" means the DOM is unchanged from the immediately preceding step.`;
 }
 
-function getExecutorActionContextPreamble(
-	options: ExecutorPromptOptions = {},
-): string {
-	if (shouldEmitExecutorActionContextFields(options)) {
-		return `previousStepStatus: "progressed"
+function getExecutorActionContextPreamble(): string {
+	return `previousStepStatus: "progressed"
 previousStepOutcome: |-
   Opened the search form.
 currentStateObservation: |-
@@ -234,16 +207,9 @@ nextActionRationale: |-
   Enter the requested query.
 
 `;
-	}
-	return "";
 }
 
-function getExecutorActionContextRules(
-	options: ExecutorPromptOptions = {},
-): string {
-	if (!shouldEmitExecutorActionContextFields(options)) {
-		return "";
-	}
+function getExecutorActionContextRules(): string {
 	return `- When the current step has no meaningful previous browser action to assess (for example the first step), use previousStepStatus: "none" and leave the three short text fields as empty strings.
 - previousStepStatus must be one of: "none", "progressed", "no_change", "blocked", "opened_tab", "switched_context", "partial"
 - previousStepOutcome must be a short phrase describing what the previous step actually changed, and MUST use YAML block scalar style: |-
@@ -338,7 +304,7 @@ function getExecutorSectionResponseFormat(
 	const planUpdateExampleBlock = isPlanningEnabled()
 		? "previousStepPlanUpdate: []\n"
 		: "";
-	const actionContextExampleBlock = getExecutorActionContextPreamble(options);
+	const actionContextExampleBlock = getExecutorActionContextPreamble();
 	const regeneratePlanShorthandInstruction = isPlanningEnabled()
 		? "  - regenerate_plan: use the tool name only\n"
 		: "";
@@ -346,7 +312,7 @@ function getExecutorSectionResponseFormat(
 		? PLAN_UPDATE_INSTRUCTIONS
 		: "";
 	const textLikeScalarFields = `link, summary, downloaded_file_path, bid, path, root, type, text, url, script, request, value`;
-	const actionContextRules = getExecutorActionContextRules(options);
+	const actionContextRules = getExecutorActionContextRules();
 	return `### Expected Output
 Respond with raw YAML enclosed by <yaml> and </yaml> tags. Everything between the tags must be parseable YAML. Do not include any text outside the tags.
 
@@ -369,7 +335,7 @@ ${actionContextRules}- Final result objects returned by return_results follow EX
 - "downloaded_file_path" MUST match a downloaded file path entry in "downloadedFiles"
 - During the run, use the temporary download path exactly as shown in "downloadedFiles" (typically "./downloads/..."), not a future synced workspace path such as "./Downloads/...".
 - The exact number of result objects depends on the request and the data you found.
-- Each key (${getResponseKeyOrder(options)}) must be present at most once and in the specified order.
+- Each key (${getResponseKeyOrder()}) must be present at most once and in the specified order.
 - Tool-call shorthand mapping:
   - click/type: the bid follows the tool name (e.g. click: "3", type: "5")
   - long_press: use a map with bid and optional durationMs from 100 to 15000
@@ -588,7 +554,7 @@ function getExecutorSectionMisc(options: ExecutorPromptOptions = {}): string {
 `
 		: "";
 	const reasoningTraceContextInstruction =
-		shouldIncludeExecutorReasoningHistory(options)
+		shouldIncludeExecutorReasoningHistory()
 			? `- Prior assistant messages may include <think>...</think> blocks containing fallible reasoning from earlier executor steps. Use them only for continuity; the current payload and browser state remain the source of truth, and you must not copy those blocks into your YAML response.
 `
 			: "";

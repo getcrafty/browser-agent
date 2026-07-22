@@ -1,10 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import yaml from "js-yaml";
-import {
-	shouldEmitExecutorActionContextFields,
-	type ExecutorPromptOptions,
-} from "../prompts.js";
 import { featureFlags } from "../../featureFlags.js";
 import { configFeatureFlags } from "../../config-feature-flags.js";
 import { getHTML } from "../../browser/browser.js";
@@ -538,21 +534,19 @@ export function logStepModelResponse(params: {
 }
 
 export function logStepActionContext(step: StepResult): void {
-	if (shouldEmitExecutorActionContextFields({ forRunAgentStep: true })) {
-		if (step.previousStepStatus !== "none") {
-			console.log(`    previousStepStatus: ${step.previousStepStatus}`);
-		}
-		if (step.previousStepOutcome) {
-			console.log(`    previousStepOutcome: ${step.previousStepOutcome}`);
-		}
-		if (step.currentStateObservation) {
-			console.log(
-				`    currentStateObservation: ${step.currentStateObservation}`,
-			);
-		}
-		if (step.nextActionRationale) {
-			console.log(`    nextActionRationale: ${step.nextActionRationale}`);
-		}
+	if (step.previousStepStatus !== "none") {
+		console.log(`    previousStepStatus: ${step.previousStepStatus}`);
+	}
+	if (step.previousStepOutcome) {
+		console.log(`    previousStepOutcome: ${step.previousStepOutcome}`);
+	}
+	if (step.currentStateObservation) {
+		console.log(
+			`    currentStateObservation: ${step.currentStateObservation}`,
+		);
+	}
+	if (step.nextActionRationale) {
+		console.log(`    nextActionRationale: ${step.nextActionRationale}`);
 	}
 }
 
@@ -674,25 +668,15 @@ export function serializeActionsForPrompt(
 	});
 }
 
-export function formatStepForPrompt(
-	step: StepResult,
-	options: ExecutorPromptOptions = {},
-): Record<string, unknown> {
+export function formatStepForPrompt(step: StepResult): Record<string, unknown> {
 	const formatted: Record<string, unknown> = {};
 	if (featureFlags.enablePlanning) {
 		formatted.previousStepPlanUpdate = step.previousStepPlanUpdate;
 	}
-	if (
-		shouldEmitExecutorActionContextFields({
-			...options,
-			forRunAgentStep: true,
-		})
-	) {
-		formatted.previousStepStatus = step.previousStepStatus;
-		formatted.previousStepOutcome = step.previousStepOutcome;
-		formatted.currentStateObservation = step.currentStateObservation;
-		formatted.nextActionRationale = step.nextActionRationale;
-	}
+	formatted.previousStepStatus = step.previousStepStatus;
+	formatted.previousStepOutcome = step.previousStepOutcome;
+	formatted.currentStateObservation = step.currentStateObservation;
+	formatted.nextActionRationale = step.nextActionRationale;
 	formatted.tools = serializeActionsForPrompt(step.actions);
 	return formatted;
 }

@@ -205,108 +205,89 @@ describe("history prompt safety", () => {
 	});
 
 	it("includes action-context fields in canonicalized assistant messages by default", () => {
-		const originalReasoningTraceContext =
-			featureFlags.executorReasoningTraceContext;
-		featureFlags.executorReasoningTraceContext = false;
-		try {
-			const messages = buildHistoryMessagesFromFullStepHistory([
-				{
-					payload: {
-						currentURL: "https://example.com/final",
-					},
-					assistant: {
-						previousStepStatus: "opened_tab",
-						previousStepOutcome: "Opened Gmail sign-in tab.",
-						currentStateObservation:
-							"Current tab is still the Workspace landing page.",
-						nextActionRationale: "Switch to the Gmail tab to continue login.",
-						actions: [{ type: "switch_tab", index: 1 }],
-						done: false,
-					},
+		const messages = buildHistoryMessagesFromFullStepHistory([
+			{
+				payload: {
+					currentURL: "https://example.com/final",
 				},
-			]);
-			assert.strictEqual(messages[1].role, "assistant");
-			assert.include(
-				String(messages[1].content),
-				"previousStepStatus: opened_tab",
-			);
-			assert.include(
-				String(messages[1].content),
-				"previousStepOutcome: Opened Gmail sign-in tab.",
-			);
-			assert.include(
-				String(messages[1].content),
-				"currentStateObservation: Current tab is still the Workspace landing page.",
-			);
-			assert.include(
-				String(messages[1].content),
-				"nextActionRationale: Switch to the Gmail tab to continue login.",
-			);
-			assert.include(String(messages[1].content), "switch_tab: 1");
-			assert.notInclude(String(messages[1].content), "thinking:");
-			assert.notInclude(String(messages[1].content), "done:");
-			assert.notInclude(String(messages[1].content), "result:");
-		} finally {
-			featureFlags.executorReasoningTraceContext =
-				originalReasoningTraceContext;
-		}
+				assistant: {
+					previousStepStatus: "opened_tab",
+					previousStepOutcome: "Opened Gmail sign-in tab.",
+					currentStateObservation:
+						"Current tab is still the Workspace landing page.",
+					nextActionRationale: "Switch to the Gmail tab to continue login.",
+					actions: [{ type: "switch_tab", index: 1 }],
+					done: false,
+				},
+			},
+		]);
+		assert.strictEqual(messages[1].role, "assistant");
+		assert.include(
+			String(messages[1].content),
+			"previousStepStatus: opened_tab",
+		);
+		assert.include(
+			String(messages[1].content),
+			"previousStepOutcome: Opened Gmail sign-in tab.",
+		);
+		assert.include(
+			String(messages[1].content),
+			"currentStateObservation: Current tab is still the Workspace landing page.",
+		);
+		assert.include(
+			String(messages[1].content),
+			"nextActionRationale: Switch to the Gmail tab to continue login.",
+		);
+		assert.include(String(messages[1].content), "switch_tab: 1");
+		assert.notInclude(String(messages[1].content), "thinking:");
+		assert.notInclude(String(messages[1].content), "done:");
+		assert.notInclude(String(messages[1].content), "result:");
 	});
 
 	it("omits legacy thinking fields from canonicalized assistant messages", () => {
-		const originalReasoningTraceContext =
-			featureFlags.executorReasoningTraceContext;
-		featureFlags.executorReasoningTraceContext = false;
-		try {
-			const messages = buildHistoryMessagesFromFullStepHistory([
-				{
-					payload: {
-						currentURL: "https://example.com/final",
-					},
-					assistant: {
-						thinking: "Done",
-						previousStepStatus: "progressed",
-						previousStepOutcome: "Clicked the result.",
-						currentStateObservation: "The result page is open.",
-						nextActionRationale: "Read the result page.",
-						actions: [{ type: "click", bid: "2" }],
-						done: true,
-						result: "Finished",
-					},
+		const messages = buildHistoryMessagesFromFullStepHistory([
+			{
+				payload: {
+					currentURL: "https://example.com/final",
 				},
-			]);
-			assert.strictEqual(messages[1].role, "assistant");
-			assert.notInclude(String(messages[1].content), "thinking:");
-			assert.include(
-				String(messages[1].content),
-				"previousStepStatus: progressed",
-			);
-			assert.include(
-				String(messages[1].content),
-				"previousStepOutcome: Clicked the result.",
-			);
-			assert.include(
-				String(messages[1].content),
-				"currentStateObservation: The result page is open.",
-			);
-			assert.include(
-				String(messages[1].content),
-				"nextActionRationale: Read the result page.",
-			);
-			assert.include(String(messages[1].content), "click:");
-			assert.notInclude(String(messages[1].content), "type: click");
-			assert.notInclude(String(messages[1].content), "done:");
-			assert.notInclude(String(messages[1].content), "result:");
-		} finally {
-			featureFlags.executorReasoningTraceContext =
-				originalReasoningTraceContext;
-		}
+				assistant: {
+					thinking: "Done",
+					previousStepStatus: "progressed",
+					previousStepOutcome: "Clicked the result.",
+					currentStateObservation: "The result page is open.",
+					nextActionRationale: "Read the result page.",
+					actions: [{ type: "click", bid: "2" }],
+					done: true,
+					result: "Finished",
+				},
+			},
+		]);
+		assert.strictEqual(messages[1].role, "assistant");
+		assert.notInclude(String(messages[1].content), "thinking:");
+		assert.include(
+			String(messages[1].content),
+			"previousStepStatus: progressed",
+		);
+		assert.include(
+			String(messages[1].content),
+			"previousStepOutcome: Clicked the result.",
+		);
+		assert.include(
+			String(messages[1].content),
+			"currentStateObservation: The result page is open.",
+		);
+		assert.include(
+			String(messages[1].content),
+			"nextActionRationale: Read the result page.",
+		);
+		assert.include(String(messages[1].content), "click:");
+		assert.notInclude(String(messages[1].content), "type: click");
+		assert.notInclude(String(messages[1].content), "done:");
+		assert.notInclude(String(messages[1].content), "result:");
 	});
 
-	it("injects reasoning traces for eligible providers or incremental context", () => {
-		const originalReasoningTraceContext =
-			featureFlags.executorReasoningTraceContext;
+	it("injects reasoning traces only with incremental context", () => {
 		const originalIncrementalDomContext = featureFlags.incrementalDomContext;
-		featureFlags.executorReasoningTraceContext = true;
 		featureFlags.incrementalDomContext = false;
 		const stepsHistory = [
 			{
@@ -328,15 +309,15 @@ describe("history prompt safety", () => {
 				provider: "vllm",
 			});
 			const nonOpenAIContent = String(nonOpenAI[1].content);
+			assert.notInclude(nonOpenAIContent, "<think>");
+			assert.notInclude(nonOpenAIContent, "Inspect page:");
+			assert.include(nonOpenAIContent, "previousStepStatus: progressed");
+			assert.include(nonOpenAIContent, "previousStepOutcome: Loaded results.");
 			assert.include(
 				nonOpenAIContent,
-				"<think>\nInspect page:\nstatus: ready\n</think>",
+				"currentStateObservation: Results are visible.",
 			);
-			assert.strictEqual(nonOpenAIContent.split("Inspect page:").length - 1, 1);
-			assert.notInclude(nonOpenAIContent, "previousStepStatus");
-			assert.notInclude(nonOpenAIContent, "previousStepOutcome");
-			assert.notInclude(nonOpenAIContent, "currentStateObservation");
-			assert.notInclude(nonOpenAIContent, "nextActionRationale");
+			assert.include(nonOpenAIContent, "nextActionRationale:");
 			assert.include(nonOpenAIContent, "click: '2'");
 			assert.notInclude(nonOpenAIContent, "done:");
 			assert.notInclude(nonOpenAIContent, "result:");
@@ -369,8 +350,6 @@ describe("history prompt safety", () => {
 				"previousStepStatus: progressed",
 			);
 		} finally {
-			featureFlags.executorReasoningTraceContext =
-				originalReasoningTraceContext;
 			featureFlags.incrementalDomContext = originalIncrementalDomContext;
 		}
 	});

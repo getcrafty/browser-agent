@@ -11,8 +11,6 @@ export const featureFlags = {
 	discardEmptyBids: true,
 	// Controls exposing prune/unprune live-DOM actions in executor prompts and execution.
 	domPruneActionTools: false,
-	// Replaces executor action-context fields with prior reasoning traces for non-OpenAI executor models.
-	executorReasoningTraceContext: false,
 	// Sends full/diff DOM context and retains prior assistant reasoning for cacheable executor trajectories.
 	incrementalDomContext: true,
 };

@@ -40,16 +40,12 @@ function deferred<T = void>(): {
 }
 
 describe("core-api", () => {
-	const originalExecutorReasoningTraceContext =
-		featureFlags.executorReasoningTraceContext;
 	const originalIncrementalDomContext = featureFlags.incrementalDomContext;
 	const originalEnablePlanning = featureFlags.enablePlanning;
 	const originalWebsiteAPIficationTools =
 		configFeatureFlags.websiteAPIficationTools;
 
 	afterEach(() => {
-		featureFlags.executorReasoningTraceContext =
-			originalExecutorReasoningTraceContext;
 		featureFlags.incrementalDomContext = originalIncrementalDomContext;
 		featureFlags.enablePlanning = originalEnablePlanning;
 		configFeatureFlags.websiteAPIficationTools =
@@ -1144,7 +1140,6 @@ describe("core-api", () => {
 	});
 
 	it("step(process_model_step_output) omits OpenAI reasoning traces when incremental context is disabled", async () => {
-		featureFlags.executorReasoningTraceContext = true;
 		featureFlags.incrementalDomContext = false;
 		const stepsHistory: Array<{
 			payload: Record<string, unknown>;
@@ -1180,7 +1175,6 @@ describe("core-api", () => {
 	});
 
 	it("step(process_model_step_output) stores reasoning tokens with incremental context", async () => {
-		featureFlags.executorReasoningTraceContext = false;
 		featureFlags.incrementalDomContext = true;
 		const stepsHistory: Array<{
 			payload: Record<string, unknown>;
@@ -3692,10 +3686,7 @@ describe("core-api", () => {
 		}
 	});
 
-	it("runAgent injects non-OpenAI reasoning traces into the next executor step", async () => {
-		const originalReasoningTraceContext =
-			featureFlags.executorReasoningTraceContext;
-		featureFlags.executorReasoningTraceContext = true;
+	it("runAgent keeps action context alongside reasoning traces", async () => {
 		let capturedStepTwoMessages: Message[] | null = null;
 		const deps = createMockCoreDeps({
 			executeActions: async ({ actions }) => ({
@@ -3710,90 +3701,82 @@ describe("core-api", () => {
 			}),
 		});
 
-		try {
-			const result = await runAgent(deps, {
-				session: {
-					port: 9222,
-					headless: true,
-					forceRestart: true,
+		const result = await runAgent(deps, {
+			session: {
+				port: 9222,
+				headless: true,
+				forceRestart: true,
+			},
+			task: "Find a result",
+			stageLLMs: {
+				findTargetURL: { provider: "openai", model: "gpt-test" },
+				dismissCookieBanner: {
+					provider: "openai",
+					model: "gpt-test",
 				},
-				task: "Find a result",
-				stageLLMs: {
-					findTargetURL: { provider: "openai", model: "gpt-test" },
-					dismissCookieBanner: {
-						provider: "openai",
-						model: "gpt-test",
-					},
-					createPlan: { provider: "openai", model: "gpt-test" },
-					preExecutionDomPruning: {
-						provider: "openai",
-						model: "gpt-test",
-					},
-					runAgent: { provider: "vllm", model: "qwen-test" },
-					dataExtraction: { provider: "openai", model: "gpt-test" },
-					verifySuccess: { provider: "openai", model: "gpt-test" },
+				createPlan: { provider: "openai", model: "gpt-test" },
+				preExecutionDomPruning: {
+					provider: "openai",
+					model: "gpt-test",
 				},
-				featureFlags: deps.featureFlags,
-				maxSteps: 3,
-				generateStep: async ({ stepNumber, messages }) => {
-					if (stepNumber === 2) capturedStepTwoMessages = messages;
-					return stepNumber === 1
-						? {
-								data: { actions: [], done: false },
-								usage: {
-									input_tokens: 8,
-									output_tokens: 3,
-									total_tokens: 11,
-								},
-								reasoning_tokens: "Inspect page:\nstatus: ready",
-							}
-						: {
-								data: {
-									actions: [{ type: "return_results" }],
-									done: false,
-								},
-								usage: {
-									input_tokens: 7,
-									output_tokens: 2,
-									total_tokens: 9,
-								},
-								reasoning_tokens: "Return stored results.",
-							};
-				},
-			});
+				runAgent: { provider: "vllm", model: "qwen-test" },
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+				verifySuccess: { provider: "openai", model: "gpt-test" },
+			},
+			featureFlags: deps.featureFlags,
+			maxSteps: 3,
+			generateStep: async ({ stepNumber, messages }) => {
+				if (stepNumber === 2) capturedStepTwoMessages = messages;
+				return stepNumber === 1
+					? {
+							data: { actions: [], done: false },
+							usage: {
+								input_tokens: 8,
+								output_tokens: 3,
+								total_tokens: 11,
+							},
+							reasoning_tokens: "Inspect page:\nstatus: ready",
+						}
+					: {
+							data: {
+								actions: [{ type: "return_results" }],
+								done: false,
+							},
+							usage: {
+								input_tokens: 7,
+								output_tokens: 2,
+								total_tokens: 9,
+							},
+							reasoning_tokens: "Return stored results.",
+						};
+			},
+		});
 
-			assert.isTrue(result.completed);
-			assert.strictEqual(
-				result.stepsHistory[0]?.reasoningTokens,
-				"Inspect page:\nstatus: ready",
-			);
-			assert.isNotNull(capturedStepTwoMessages);
-			const systemContent = String(
-				capturedStepTwoMessages?.[0]?.content ?? "",
-			);
-			const previousAssistantContent = String(
-				capturedStepTwoMessages?.at(-2)?.content ?? "",
-			);
-			assert.notInclude(systemContent, "previousStepStatus");
-			assert.include(
-				previousAssistantContent,
-				"<think>\nInspect page:\nstatus: ready\n</think>",
-			);
-			assert.strictEqual(
-				previousAssistantContent.split("Inspect page:").length - 1,
-				1,
-			);
-			assert.notInclude(previousAssistantContent, "previousStepStatus");
-			assert.notInclude(previousAssistantContent, "previousStepOutcome");
-			assert.notInclude(
-				previousAssistantContent,
-				"currentStateObservation",
-			);
-			assert.notInclude(previousAssistantContent, "nextActionRationale");
-		} finally {
-			featureFlags.executorReasoningTraceContext =
-				originalReasoningTraceContext;
-		}
+		assert.isTrue(result.completed);
+		assert.strictEqual(
+			result.stepsHistory[0]?.reasoningTokens,
+			"Inspect page:\nstatus: ready",
+		);
+		assert.isNotNull(capturedStepTwoMessages);
+		const systemContent = String(
+			capturedStepTwoMessages?.[0]?.content ?? "",
+		);
+		const previousAssistantContent = String(
+			capturedStepTwoMessages?.at(-2)?.content ?? "",
+		);
+		assert.notInclude(systemContent, "previousStepStatus");
+		assert.include(
+			previousAssistantContent,
+			"<think>\nInspect page:\nstatus: ready\n</think>",
+		);
+		assert.strictEqual(
+			previousAssistantContent.split("Inspect page:").length - 1,
+			1,
+		);
+		assert.include(previousAssistantContent, "previousStepStatus: none");
+		assert.include(previousAssistantContent, "previousStepOutcome:");
+		assert.include(previousAssistantContent, "currentStateObservation:");
+		assert.include(previousAssistantContent, "nextActionRationale:");
 	});
 
 	it("runAgent logs action-context fields before action execution lines", async () => {

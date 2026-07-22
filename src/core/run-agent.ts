@@ -720,9 +720,6 @@ export async function runAgent(
 			}),
 	};
 	const input = rawInput;
-	const executorPromptOptions = {
-		provider: input.stageLLMs.runAgent.provider,
-	};
 	const abortSignal = input.abortSignal;
 	throwIfAborted(abortSignal);
 	await input.onRunStarted?.({
@@ -982,10 +979,7 @@ export async function runAgent(
 								{
 									role: "assistant",
 									content: yaml.dump(
-										formatStepForPrompt(
-											parsedRawStep,
-											executorPromptOptions,
-										),
+										formatStepForPrompt(parsedRawStep),
 									),
 									reasoning_tokens,
 								},
@@ -1103,10 +1097,7 @@ export async function runAgent(
 							{
 								role: "assistant",
 								content: yaml.dump(
-									formatStepForPrompt(
-										processResult.step,
-										executorPromptOptions,
-									),
+									formatStepForPrompt(processResult.step),
 								),
 								reasoning_tokens,
 							},
