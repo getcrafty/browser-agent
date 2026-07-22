@@ -13,4 +13,6 @@ export const featureFlags = {
 	domPruneActionTools: false,
 	// Sends full/diff DOM context and retains prior assistant reasoning for cacheable executor trajectories.
 	incrementalDomContext: true,
+	// Requires a top-level executor thinking field for any model reasoning.
+	executorThinkingField: false,
 };

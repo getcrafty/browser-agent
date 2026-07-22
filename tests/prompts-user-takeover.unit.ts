@@ -100,27 +100,43 @@ describe("executor prompt user_takeover tool", () => {
 		}
 	});
 
-	it("always omits thinking field requirements", () => {
+	it("gates the executor thinking field with an internal feature flag", () => {
 		const originalEnablePlanning = featureFlags.enablePlanning;
+		const originalExecutorThinkingField = featureFlags.executorThinkingField;
 		featureFlags.enablePlanning = true;
 		try {
-			const prompt = getExecutorSystem();
+			featureFlags.executorThinkingField = false;
+			const promptWithoutThinking = getExecutorSystem();
 			assert.notInclude(
-				prompt,
-				`thinking: "Reasoning based on what you observe`,
+				promptWithoutThinking,
+				`thinking: |-`,
 			);
 			assert.include(
-				prompt,
+				promptWithoutThinking,
 				`Each key (previousStepPlanUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
 			);
-			assert.notInclude(prompt, "\ndone:");
-			assert.include(prompt, `previousStepStatus must be one of:`);
+
+			featureFlags.executorThinkingField = true;
+			const promptWithThinking = getExecutorSystem();
+			assert.include(promptWithThinking, `thinking: |-
+  The previous action revealed the search field, so the next useful step is to enter the query.`);
+			assert.include(
+				promptWithThinking,
+				`thinking must always be present, must be used for any kind of reasoning, and MUST use YAML block scalar style: |-`,
+			);
+			assert.include(
+				promptWithThinking,
+				`Each key (thinking, previousStepPlanUpdate, previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale, tools) must be present at most once and in the specified order.`,
+			);
+			assert.notInclude(promptWithThinking, "\ndone:");
+			assert.include(promptWithThinking, `previousStepStatus must be one of:`);
 			assert.notInclude(
-				prompt,
+				promptWithThinking,
 				`PUT ANY THINKING OR REASONING IN THE "thinking" FIELD OF THE YAML.`,
 			);
 		} finally {
 			featureFlags.enablePlanning = originalEnablePlanning;
+			featureFlags.executorThinkingField = originalExecutorThinkingField;
 		}
 	});
 

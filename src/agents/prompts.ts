@@ -118,7 +118,10 @@ function getResponseKeyOrder(): string {
 	const actionContextKeys =
 		"previousStepStatus, previousStepOutcome, currentStateObservation, nextActionRationale";
 	const planUpdateKey = isPlanningEnabled() ? "previousStepPlanUpdate, " : "";
-	return `${planUpdateKey}${actionContextKeys}, tools`;
+	const thinkingKey = featureFlags.executorThinkingField
+		? "thinking, "
+		: "";
+	return `${thinkingKey}${planUpdateKey}${actionContextKeys}, tools`;
 }
 
 function getPreStepScreenshotPayloadDescription(): string {
@@ -198,7 +201,12 @@ function getIncrementalDomContextInstructions(): string {
 }
 
 function getExecutorActionContextPreamble(): string {
-	return `previousStepStatus: "progressed"
+	const thinkingExample = featureFlags.executorThinkingField
+		? `thinking: |-
+  The previous action revealed the search field, so the next useful step is to enter the query.
+`
+		: "";
+	return `${thinkingExample}previousStepStatus: "progressed"
 previousStepOutcome: |-
   Opened the search form.
 currentStateObservation: |-
@@ -210,7 +218,11 @@ nextActionRationale: |-
 }
 
 function getExecutorActionContextRules(): string {
-	return `- When the current step has no meaningful previous browser action to assess (for example the first step), use previousStepStatus: "none" and leave the three short text fields as empty strings.
+	const thinkingRule = featureFlags.executorThinkingField
+		? `- thinking must always be present, must be used for any kind of reasoning, and MUST use YAML block scalar style: |-
+`
+		: "";
+	return `${thinkingRule}- When the current step has no meaningful previous browser action to assess (for example the first step), use previousStepStatus: "none" and leave the three short text fields as empty strings.
 - previousStepStatus must be one of: "none", "progressed", "no_change", "blocked", "opened_tab", "switched_context", "partial"
 - previousStepOutcome must be a short phrase describing what the previous step actually changed, and MUST use YAML block scalar style: |-
 - currentStateObservation must be a short phrase describing one important fact from the current page, and MUST use YAML block scalar style: |-
