@@ -72,7 +72,21 @@ export interface ProviderChatArgs {
 	prompt: string;
 	abortSignal?: AbortSignal;
 	onOutputChunk?: (chunk: string) => void;
+	onLifecycleEvent?: (event: ProviderChatLifecycleEvent) => void;
 }
+
+export type ProviderChatLifecycleEvent =
+	| {
+			type: "first_delta";
+			deltaType: "text" | "reasoning";
+	  }
+	| { type: "first_text_delta" }
+	| {
+			type: "text_stream_complete";
+			chunkCount: number;
+			outputCharacters: number;
+	  }
+	| { type: "usage_complete" };
 
 let openaiClient: OpenAI | null = null;
 let providerChatOverride:
@@ -346,11 +360,16 @@ function buildProviderOptions(params: {
 	openrouterProvider?: string;
 }) {
 	if (params.provider === "openai") {
+		const uses24HourPromptCacheRetention =
+			params.model === "gpt-5.5" || params.model === "gpt-5.5-pro";
 		return {
 			openai: {
 				include_usage: true,
 				reasoningSummary: "detailed",
 				reasoningEffort: params.reasoningEffort,
+				...(uses24HourPromptCacheRetention
+					? { promptCacheRetention: "24h" as const }
+					: {}),
 			},
 		};
 	}
@@ -452,29 +471,65 @@ async function runProviderChatInternal(args: ProviderChatArgs): Promise<{
 		openrouterProvider: args.options.openrouterProvider,
 	});
 
-	if (args.onOutputChunk) {
+	if (args.onOutputChunk || args.onLifecycleEvent) {
+		let firstDeltaEmitted = false;
+		let firstTextDeltaEmitted = false;
 		const streamed = streamText({
 			model: model as any,
 			prompt: args.prompt,
 			abortSignal: args.abortSignal,
 			temperature: isVLLMProvider ? 0.2 : undefined,
+			onChunk: ({ chunk }) => {
+				if (chunk.type !== "text-delta" && chunk.type !== "reasoning-delta") {
+					return;
+				}
+				if (!firstDeltaEmitted) {
+					firstDeltaEmitted = true;
+					args.onLifecycleEvent?.({
+						type: "first_delta",
+						deltaType: chunk.type === "text-delta" ? "text" : "reasoning",
+					});
+				}
+				if (chunk.type === "text-delta" && !firstTextDeltaEmitted) {
+					firstTextDeltaEmitted = true;
+					args.onLifecycleEvent?.({ type: "first_text_delta" });
+				}
+			},
 			providerOptions: providerOptions as unknown as NonNullable<
 				Parameters<typeof streamText>[0]["providerOptions"]
 			>,
 		});
 		const chunks: string[] = [];
 		for await (const chunk of streamed.textStream) {
+			console.log(chunk)
 			chunks.push(chunk);
-			args.onOutputChunk(chunk);
+			args.onOutputChunk?.(chunk);
 		}
-		const usage = await streamed.usage;
-		const { cleanContent, reasoningTokens } = stripThinkBlocks(
-			chunks.join(""),
-		);
+		args.onLifecycleEvent?.({
+			type: "text_stream_complete",
+			chunkCount: chunks.length,
+			outputCharacters: chunks.reduce(
+				(total, chunk) => total + chunk.length,
+				0,
+			),
+		});
+		const [usage, streamedReasoning] = await Promise.all([
+			streamed.usage,
+			streamed.reasoning,
+		]);
+		args.onLifecycleEvent?.({ type: "usage_complete" });
+		const { cleanContent, reasoningTokens } = stripThinkBlocks(chunks.join(""));
+		const mergedReasoningTokens = [
+			normalizeReasoningToString(streamedReasoning ?? []),
+			reasoningTokens,
+		]
+			.filter((value) => value.length > 0)
+			.join("\n")
+			.trim();
 		return {
 			content: cleanContent || "{}",
 			usage: toTokenUsage(usage),
-			reasoning_tokens: reasoningTokens,
+			reasoning_tokens: mergedReasoningTokens,
 		};
 	}
 

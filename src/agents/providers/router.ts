@@ -13,8 +13,39 @@ const MAX_RETRIES = 5;
 const BASE_RETRY_DELAY_MS = 500;
 const DEFAULT_OPENAI_TOKEN_COUNT_MODEL = "gpt-5.2";
 const DEFAULT_CHAT_YAML_HARD_TIMEOUT_MS = 300_000;
+const DEFAULT_CHAT_YAML_STALL_LOG_INTERVAL_MS = 5_000;
 
 const CHAT_YAML_HARD_TIMEOUT_MS_ENV = "BROWSER_AGENT_CHAT_YAML_HARD_TIMEOUT_MS";
+const CHAT_YAML_STALL_LOG_INTERVAL_MS_ENV =
+	"BROWSER_AGENT_CHAT_YAML_STALL_LOG_INTERVAL_MS";
+
+type ChatYAMLRequestPhase =
+	"awaiting_first_token" | "streaming" | "awaiting_usage" | "parsing";
+
+type ChatYAMLLogValue = string | number | boolean | undefined;
+
+function logChatYAMLEvent(
+	event: string,
+	fields: Record<string, ChatYAMLLogValue>,
+): void {
+	const details = Object.entries(fields)
+		.filter(
+			(entry): entry is [string, string | number | boolean] =>
+				entry[1] !== undefined,
+		)
+		.map(([key, value]) =>
+			typeof value === "string"
+				? `${key}=${JSON.stringify(value)}`
+				: `${key}=${value}`,
+		)
+		.join(" ");
+	console.log(`[LLM][chatYAML] event=${event}${details ? ` ${details}` : ""}`);
+}
+
+function getErrorName(error: unknown): string {
+	if (error instanceof Error && error.name) return error.name;
+	return typeof error;
+}
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,9 +107,21 @@ function getChatYAMLHardTimeoutMs(): number {
 	);
 }
 
+function getChatYAMLStallLogIntervalMs(): number {
+	return (
+		readPositiveIntEnv(CHAT_YAML_STALL_LOG_INTERVAL_MS_ENV) ??
+		DEFAULT_CHAT_YAML_STALL_LOG_INTERVAL_MS
+	);
+}
+
 async function withRetries<T>(
 	operation: string,
 	fn: (attempt: number) => Promise<T>,
+	onRetry?: (input: {
+		attempt: number;
+		backoffMs: number;
+		error: unknown;
+	}) => void,
 ): Promise<T> {
 	let lastError: unknown;
 
@@ -94,10 +137,14 @@ async function withRetries<T>(
 				break;
 			}
 
+			const backoffMs = BASE_RETRY_DELAY_MS * attempt;
+			onRetry?.({ attempt, backoffMs, error });
 			console.log(
-				`[LLM] ${operation} failed (attempt ${attempt}/${MAX_RETRIES}): ${toErrorMessage(error)}. Retrying...`,
+				`[LLM] ${operation} failed (attempt ${attempt}/${MAX_RETRIES}, error_name=${getErrorName(
+					error,
+				)}, retry_backoff_ms=${backoffMs}). Retrying...`,
 			);
-			await sleep(BASE_RETRY_DELAY_MS * attempt);
+			await sleep(backoffMs);
 		}
 	}
 
@@ -449,247 +496,441 @@ export async function chatYAML<T>(
 ): Promise<ChatJSONResult<T>> {
 	const { provider, model } = options;
 	const completionPrompt = toCompletionPrompt(messages);
+	const resolvedCaller = caller || "unknown";
+	const operationStartedAt = Date.now();
+	let lastAttempt = 0;
 
-	return withRetries(`chatYAML:${caller || "unknown"}`, async (attempt) => {
-		let content = "";
-		let usage: TokenUsage = {
-			input_tokens: 0,
-			output_tokens: 0,
-			total_tokens: 0,
-		};
-		let reasoning_tokens = "";
-		const attemptStartedAt = Date.now();
-		const generationStartedAt = Date.now();
-		const resolvedCaller = caller || "unknown";
-		if (provider === "vllm") {
-			console.log(
-				`[LLM][vllm] request_start caller=${resolvedCaller} attempt=${attempt} retry_count=${attempt - 1} model=${model}`,
-			);
-		}
-		const hardTimeoutMs = getChatYAMLHardTimeoutMs();
-		const abortController = new AbortController();
-		let hardTimedOut = false;
-		let externalAbortReject: ((error: ChatYAMLAbortError) => void) | null =
-			null;
-		const externalAbortPromise = new Promise<never>((_, reject) => {
-			externalAbortReject = reject;
-		});
-		const handleExternalAbort = () => {
-			abortController.abort(abortSignal?.reason);
-			externalAbortReject?.(new ChatYAMLAbortError(abortSignal?.reason));
-		};
-		if (abortSignal?.aborted) {
-			handleExternalAbort();
-		} else {
-			abortSignal?.addEventListener("abort", handleExternalAbort, {
-				once: true,
-			});
-		}
+	try {
+		const result = await withRetries(
+			`chatYAML:${resolvedCaller}`,
+			async (attempt) => {
+				lastAttempt = attempt;
+				let content = "";
+				let usage: TokenUsage = {
+					input_tokens: 0,
+					output_tokens: 0,
+					total_tokens: 0,
+				};
+				let reasoning_tokens = "";
+				const attemptStartedAt = Date.now();
+				const hardTimeoutMs = getChatYAMLHardTimeoutMs();
+				const stallLogIntervalMs = getChatYAMLStallLogIntervalMs();
+				let requestPhase: ChatYAMLRequestPhase = "awaiting_first_token";
+				let firstDeltaMs: number | undefined;
+				let firstTextDeltaMs: number | undefined;
+				let streamedChunkCount = 0;
+				let streamedOutputCharacters = 0;
 
-		let rejectHardTimeout:
-			((error: ChatYAMLHardTimeoutError) => void) | null = null;
-		const hardTimeoutPromise = new Promise<never>((_, reject) => {
-			rejectHardTimeout = reject;
-		});
-		const hardTimeoutHandle: ReturnType<typeof setTimeout> = setTimeout(
-			() => {
-				hardTimedOut = true;
-				abortController.abort();
-				rejectHardTimeout?.(
-					new ChatYAMLHardTimeoutError({
-						provider,
+				logChatYAMLEvent("request_start", {
+					caller: resolvedCaller,
+					provider,
+					model,
+					attempt,
+					retry_count: attempt - 1,
+					message_count: messages.length,
+					prompt_characters: completionPrompt.length,
+					hard_timeout_ms: hardTimeoutMs,
+				});
+
+				const heartbeatHandle: ReturnType<typeof setInterval> = setInterval(
+					() => {
+						logChatYAMLEvent("heartbeat", {
+							caller: resolvedCaller,
+							provider,
+							model,
+							attempt,
+							phase: requestPhase,
+							elapsed_ms: Date.now() - attemptStartedAt,
+							chunk_count: streamedChunkCount,
+							output_characters: streamedOutputCharacters,
+						});
+					},
+					stallLogIntervalMs,
+				);
+				if (
+					typeof heartbeatHandle === "object" &&
+					heartbeatHandle !== null &&
+					"unref" in heartbeatHandle &&
+					typeof heartbeatHandle.unref === "function"
+				) {
+					heartbeatHandle.unref();
+				}
+
+				const abortController = new AbortController();
+				let hardTimedOut = false;
+				let externalAbortReject: ((error: ChatYAMLAbortError) => void) | null =
+					null;
+				const externalAbortPromise = new Promise<never>((_, reject) => {
+					externalAbortReject = reject;
+				});
+				const handleExternalAbort = () => {
+					abortController.abort(abortSignal?.reason);
+					externalAbortReject?.(new ChatYAMLAbortError(abortSignal?.reason));
+				};
+				if (abortSignal?.aborted) {
+					handleExternalAbort();
+				} else {
+					abortSignal?.addEventListener("abort", handleExternalAbort, {
+						once: true,
+					});
+				}
+
+				let rejectHardTimeout:
+					((error: ChatYAMLHardTimeoutError) => void) | null = null;
+				const hardTimeoutPromise = new Promise<never>((_, reject) => {
+					rejectHardTimeout = reject;
+				});
+				const hardTimeoutHandle: ReturnType<typeof setTimeout> = setTimeout(
+					() => {
+						hardTimedOut = true;
+						logChatYAMLEvent("hard_timeout", {
+							caller: resolvedCaller,
+							provider,
+							model,
+							attempt,
+							phase: requestPhase,
+							elapsed_ms: Date.now() - attemptStartedAt,
+							timeout_ms: hardTimeoutMs,
+						});
+						abortController.abort();
+						rejectHardTimeout?.(
+							new ChatYAMLHardTimeoutError({
+								provider,
+								caller: resolvedCaller,
+								attempt,
+								timeoutMs: hardTimeoutMs,
+							}),
+						);
+					},
+					hardTimeoutMs,
+				);
+				if (
+					typeof hardTimeoutHandle === "object" &&
+					hardTimeoutHandle !== null &&
+					"unref" in hardTimeoutHandle &&
+					typeof hardTimeoutHandle.unref === "function"
+				) {
+					hardTimeoutHandle.unref();
+				}
+
+				try {
+					await Promise.race([
+						(async () => {
+							({ content, usage, reasoning_tokens } = await runProviderChat({
+								options: { ...options, model },
+								prompt: completionPrompt,
+								abortSignal: abortController.signal,
+								onOutputChunk,
+								onLifecycleEvent: (event) => {
+									const elapsedMs = Date.now() - attemptStartedAt;
+									if (event.type === "first_delta") {
+										if (firstDeltaMs === undefined) {
+											firstDeltaMs = elapsedMs;
+										}
+										requestPhase = "streaming";
+										logChatYAMLEvent("first_delta", {
+											caller: resolvedCaller,
+											provider,
+											model,
+											attempt,
+											delta_type: event.deltaType,
+											elapsed_ms: elapsedMs,
+										});
+										return;
+									}
+									if (event.type === "first_text_delta") {
+										if (firstTextDeltaMs === undefined) {
+											firstTextDeltaMs = elapsedMs;
+										}
+										requestPhase = "streaming";
+										logChatYAMLEvent("first_text_delta", {
+											caller: resolvedCaller,
+											provider,
+											model,
+											attempt,
+											elapsed_ms: elapsedMs,
+										});
+										return;
+									}
+									if (event.type === "text_stream_complete") {
+										streamedChunkCount = event.chunkCount;
+										streamedOutputCharacters = event.outputCharacters;
+										requestPhase = "awaiting_usage";
+										logChatYAMLEvent("text_stream_complete", {
+											caller: resolvedCaller,
+											provider,
+											model,
+											attempt,
+											elapsed_ms: elapsedMs,
+											chunk_count: streamedChunkCount,
+											output_characters: streamedOutputCharacters,
+										});
+										return;
+									}
+									logChatYAMLEvent("usage_complete", {
+										caller: resolvedCaller,
+										provider,
+										model,
+										attempt,
+										elapsed_ms: elapsedMs,
+									});
+								},
+							}));
+						})(),
+						hardTimeoutPromise,
+						externalAbortPromise,
+					]);
+				} catch (error) {
+					logChatYAMLEvent("request_error", {
 						caller: resolvedCaller,
+						provider,
+						model,
 						attempt,
-						timeoutMs: hardTimeoutMs,
-					}),
-				);
-			},
-			hardTimeoutMs,
-		);
-		if (
-			typeof hardTimeoutHandle === "object" &&
-			hardTimeoutHandle !== null &&
-			"unref" in hardTimeoutHandle &&
-			typeof hardTimeoutHandle.unref === "function"
-		) {
-			hardTimeoutHandle.unref();
-		}
-
-		try {
-			await Promise.race([
-				(async () => {
-					({ content, usage, reasoning_tokens } =
-						await runProviderChat({
-							options: { ...options, model },
-							prompt: completionPrompt,
-							abortSignal: abortController.signal,
-							onOutputChunk,
-						}));
-				})(),
-				hardTimeoutPromise,
-				externalAbortPromise,
-			]);
-		} catch (error) {
-			onTrace?.({
-				caller: resolvedCaller,
-				provider,
-				model,
-				attempt,
-				messages,
-				raw_response: content || undefined,
-				usage,
-				reasoning_tokens,
-				error: toErrorMessage(error),
-			});
-			if (hardTimedOut) {
-				throw error;
-			}
-			if (isAbortError(error)) {
-				throw error;
-			}
-			if (provider === "vllm") {
-				console.log(
-					`[LLM][vllm] request_failed caller=${resolvedCaller} attempt=${attempt} retry_count=${attempt - 1} latency_ms=${Date.now() - attemptStartedAt} error=${toErrorMessage(error)}`,
-				);
-			}
-			throw error;
-		} finally {
-			clearTimeout(hardTimeoutHandle);
-			abortSignal?.removeEventListener("abort", handleExternalAbort);
-			if (hardTimedOut) {
-				abortController.abort();
-			}
-		}
-
-		const generationTimeMs = Date.now() - generationStartedAt;
-		usage.generation_time_ms = generationTimeMs;
-		if (provider === "vllm") {
-			console.log(
-				`[LLM][vllm] request_end caller=${resolvedCaller} attempt=${attempt} retry_count=${attempt - 1} latency_ms=${Date.now() - attemptStartedAt} total_tokens=${usage.total_tokens} input_tokens=${usage.input_tokens} output_tokens=${usage.output_tokens}`,
-			);
-		}
-
-		const contentWithExtractedYAML = extractYAMLTagContent(content);
-		const cleanContent = stripMarkdownCodeBlocks(contentWithExtractedYAML);
-
-		try {
-			const parsed = yaml.load(cleanContent);
-			if (
-				parsed === null ||
-				parsed === undefined ||
-				typeof parsed !== "object" ||
-				Array.isArray(parsed)
-			) {
-				throw new Error(
-					`Expected a YAML object, got ${parsed === null ? "null" : Array.isArray(parsed) ? "array" : typeof parsed}`,
-				);
-			}
-			onTrace?.({
-				caller: resolvedCaller,
-				provider,
-				model,
-				attempt,
-				messages,
-				output: parsed as T,
-				raw_response: cleanContent,
-				usage,
-				reasoning_tokens,
-			});
-			return {
-				data: parsed as T,
-				usage,
-				reasoning_tokens,
-			};
-		} catch (e) {
-			const repairedContent =
-				repairUnquotedTextLikeYamlScalars(cleanContent);
-			if (repairedContent !== cleanContent) {
-				try {
-					const repairedParsed = yaml.load(repairedContent);
-					if (
-						repairedParsed !== null &&
-						repairedParsed !== undefined &&
-						typeof repairedParsed === "object" &&
-						!Array.isArray(repairedParsed)
-					) {
-						onTrace?.({
-							caller: resolvedCaller,
-							provider,
-							model,
-							attempt,
-							messages,
-							output: repairedParsed as T,
-							raw_response: repairedContent,
-							usage,
-							reasoning_tokens,
-						});
-						return {
-							data: repairedParsed as T,
-							usage,
-							reasoning_tokens,
-						};
+						phase: requestPhase,
+						elapsed_ms: Date.now() - attemptStartedAt,
+						error_name: getErrorName(error),
+						hard_timeout: hardTimedOut,
+					});
+					onTrace?.({
+						caller: resolvedCaller,
+						provider,
+						model,
+						attempt,
+						messages,
+						raw_response: content || undefined,
+						usage,
+						reasoning_tokens,
+						error: toErrorMessage(error),
+					});
+					if (hardTimedOut) {
+						throw error;
 					}
-				} catch {
-					// Fall through to the original parse error below.
+					if (isAbortError(error)) {
+						throw error;
+					}
+					throw error;
+				} finally {
+					clearInterval(heartbeatHandle);
+					clearTimeout(hardTimeoutHandle);
+					abortSignal?.removeEventListener("abort", handleExternalAbort);
+					if (hardTimedOut) {
+						abortController.abort();
+					}
 				}
-			}
 
-			const strippedSummaryFields =
-				stripAndSalvageAdvisoryStepContextFields(cleanContent);
-			if (strippedSummaryFields.changed) {
+				const generationTimeMs = Date.now() - attemptStartedAt;
+				usage.generation_time_ms = generationTimeMs;
+				if (firstDeltaMs !== undefined) {
+					usage.time_to_first_token_ms = firstDeltaMs;
+				}
+				logChatYAMLEvent("provider_complete", {
+					caller: resolvedCaller,
+					provider,
+					model,
+					attempt,
+					elapsed_ms: generationTimeMs,
+					time_to_first_token_ms: firstDeltaMs,
+					time_to_first_text_ms: firstTextDeltaMs,
+					input_tokens: usage.input_tokens,
+					cached_input_tokens: usage.cached_input_tokens,
+					output_tokens: usage.output_tokens,
+					total_tokens: usage.total_tokens,
+				});
+
+				requestPhase = "parsing";
+				const parseStartedAt = Date.now();
+				logChatYAMLEvent("parse_start", {
+					caller: resolvedCaller,
+					provider,
+					model,
+					attempt,
+					response_characters: content.length,
+				});
+				const contentWithExtractedYAML = extractYAMLTagContent(content);
+				const cleanContent = stripMarkdownCodeBlocks(contentWithExtractedYAML);
+
 				try {
-					const strippedParsed = yaml.load(
-						strippedSummaryFields.content,
+					const parsed = yaml.load(cleanContent);
+					if (
+						parsed === null ||
+						parsed === undefined ||
+						typeof parsed !== "object" ||
+						Array.isArray(parsed)
+					) {
+						throw new Error(
+							`Expected a YAML object, got ${
+								parsed === null
+									? "null"
+									: Array.isArray(parsed)
+										? "array"
+										: typeof parsed
+							}`,
+						);
+					}
+					logChatYAMLEvent("parse_complete", {
+						caller: resolvedCaller,
+						provider,
+						model,
+						attempt,
+						parse_ms: Date.now() - parseStartedAt,
+						repair: "none",
+					});
+					onTrace?.({
+						caller: resolvedCaller,
+						provider,
+						model,
+						attempt,
+						messages,
+						output: parsed as T,
+						raw_response: cleanContent,
+						usage,
+						reasoning_tokens,
+					});
+					return {
+						data: parsed as T,
+						usage,
+						reasoning_tokens,
+					};
+				} catch (e) {
+					const repairedContent =
+						repairUnquotedTextLikeYamlScalars(cleanContent);
+					if (repairedContent !== cleanContent) {
+						try {
+							const repairedParsed = yaml.load(repairedContent);
+							if (
+								repairedParsed !== null &&
+								repairedParsed !== undefined &&
+								typeof repairedParsed === "object" &&
+								!Array.isArray(repairedParsed)
+							) {
+								logChatYAMLEvent("parse_complete", {
+									caller: resolvedCaller,
+									provider,
+									model,
+									attempt,
+									parse_ms: Date.now() - parseStartedAt,
+									repair: "unquoted_scalars",
+								});
+								onTrace?.({
+									caller: resolvedCaller,
+									provider,
+									model,
+									attempt,
+									messages,
+									output: repairedParsed as T,
+									raw_response: repairedContent,
+									usage,
+									reasoning_tokens,
+								});
+								return {
+									data: repairedParsed as T,
+									usage,
+									reasoning_tokens,
+								};
+							}
+						} catch {
+							// Fall through to the original parse error below.
+						}
+					}
+
+					const strippedSummaryFields =
+						stripAndSalvageAdvisoryStepContextFields(cleanContent);
+					if (strippedSummaryFields.changed) {
+						try {
+							const strippedParsed = yaml.load(strippedSummaryFields.content);
+							if (
+								strippedParsed !== null &&
+								strippedParsed !== undefined &&
+								typeof strippedParsed === "object" &&
+								!Array.isArray(strippedParsed)
+							) {
+								const mergedParsed = mergeSalvagedAdvisoryStepContextFields(
+									strippedParsed as T,
+									strippedSummaryFields.salvaged,
+								);
+								logChatYAMLEvent("parse_complete", {
+									caller: resolvedCaller,
+									provider,
+									model,
+									attempt,
+									parse_ms: Date.now() - parseStartedAt,
+									repair: "advisory_fields",
+								});
+								onTrace?.({
+									caller: resolvedCaller,
+									provider,
+									model,
+									attempt,
+									messages,
+									output: mergedParsed,
+									raw_response: cleanContent,
+									usage,
+									reasoning_tokens,
+								});
+								return {
+									data: mergedParsed,
+									usage,
+									reasoning_tokens,
+								};
+							}
+						} catch {
+							// Fall through to the original parse error below.
+						}
+					}
+
+					const location = caller || "unknown";
+					logChatYAMLEvent("parse_error", {
+						caller: resolvedCaller,
+						provider,
+						model,
+						attempt,
+						parse_ms: Date.now() - parseStartedAt,
+						error_name: getErrorName(e),
+					});
+					onTrace?.({
+						caller: resolvedCaller,
+						provider,
+						model,
+						attempt,
+						messages,
+						raw_response: cleanContent,
+						usage,
+						reasoning_tokens,
+						error: `YAML parse error in ${location}: ${(e as Error).message}`,
+					});
+					throw new Error(
+						`YAML parse error in ${location}: ${(e as Error).message}`,
 					);
-					if (
-						strippedParsed !== null &&
-						strippedParsed !== undefined &&
-						typeof strippedParsed === "object" &&
-						!Array.isArray(strippedParsed)
-					) {
-						const mergedParsed =
-							mergeSalvagedAdvisoryStepContextFields(
-								strippedParsed as T,
-								strippedSummaryFields.salvaged,
-							);
-						onTrace?.({
-							caller: resolvedCaller,
-							provider,
-							model,
-							attempt,
-							messages,
-							output: mergedParsed,
-							raw_response: cleanContent,
-							usage,
-							reasoning_tokens,
-						});
-						return {
-							data: mergedParsed,
-							usage,
-							reasoning_tokens,
-						};
-					}
-				} catch {
-					// Fall through to the original parse error below.
 				}
-			}
-
-			const location = caller || "unknown";
-			const preview = cleanContent;
-			onTrace?.({
-				caller: resolvedCaller,
-				provider,
-				model,
-				attempt,
-				messages,
-				raw_response: cleanContent,
-				usage,
-				reasoning_tokens,
-				error: `YAML parse error in ${location}: ${(e as Error).message}`,
-			});
-			throw new Error(
-				`YAML parse error in ${location}: ${(e as Error).message}\nRaw response: ${preview}...`,
-			);
-		}
-	});
+			},
+			({ attempt, backoffMs, error }) => {
+				logChatYAMLEvent("retry_backoff", {
+					caller: resolvedCaller,
+					provider,
+					model,
+					attempt,
+					backoff_ms: backoffMs,
+					error_name: getErrorName(error),
+				});
+			},
+		);
+		logChatYAMLEvent("operation_complete", {
+			caller: resolvedCaller,
+			provider,
+			model,
+			attempts: lastAttempt,
+			elapsed_ms: Date.now() - operationStartedAt,
+		});
+		return result;
+	} catch (error) {
+		logChatYAMLEvent("operation_error", {
+			caller: resolvedCaller,
+			provider,
+			model,
+			attempts: lastAttempt,
+			elapsed_ms: Date.now() - operationStartedAt,
+			error_name: getErrorName(error),
+		});
+		throw error;
+	}
 }

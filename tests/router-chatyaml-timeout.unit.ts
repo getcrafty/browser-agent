@@ -15,6 +15,11 @@ describe("router chatYAML timeout", () => {
 
 	it("retries hard-timed-out calls and eventually succeeds", async () => {
 		process.env[HARD_TIMEOUT_MS_ENV] = "20";
+		const logs: string[] = [];
+		const originalConsoleLog = console.log;
+		console.log = (...args: unknown[]) => {
+			logs.push(args.map((value) => String(value)).join(" "));
+		};
 
 		let streamAttempt = 0;
 		__setProviderOverrideForTests("openai", async (args) => {
@@ -47,18 +52,37 @@ describe("router chatYAML timeout", () => {
 			};
 		});
 
-		const messages: Message[] = [{ role: "user", content: "test" }];
-		const result = await chatYAML<{ state: string }>(
-			messages,
-			{
-				provider: "openai",
-				model: "gpt-5.2-mini",
-			},
-			"router-timeout-test",
-		);
+		try {
+			const messages: Message[] = [{ role: "user", content: "test" }];
+			const result = await chatYAML<{ state: string }>(
+				messages,
+				{
+					provider: "openai",
+					model: "gpt-5.2-mini",
+				},
+				"router-timeout-test",
+			);
 
-		assert.strictEqual(result.data.state, "ok");
-		assert.strictEqual(streamAttempt, 3);
+			assert.strictEqual(result.data.state, "ok");
+			assert.strictEqual(streamAttempt, 3);
+		} finally {
+			console.log = originalConsoleLog;
+		}
+		assert.strictEqual(
+			logs.filter((entry) => entry.includes("event=hard_timeout")).length,
+			2,
+		);
+		assert.strictEqual(
+			logs.filter((entry) => entry.includes("event=retry_backoff")).length,
+			2,
+		);
+		assert.isTrue(
+			logs.some(
+				(entry) =>
+					entry.includes("event=operation_complete") &&
+					entry.includes("attempts=3"),
+			),
+		);
 	});
 
 	it("always uses streaming for OpenAI chatYAML", async () => {

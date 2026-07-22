@@ -6,7 +6,7 @@ couldBeHidden
           bid="3nb" button: "Main menu"
           hidden:
             button: "Go back, Close"
-            bid="3nd,3nc" href="/" presentation: "Google"
+            a bid="3nd,3nc" presentation: "Google"
             heading
         bid="5ev":
           div:
@@ -21,37 +21,23 @@ couldBeHidden
           span:
             button bid="3nl": "Change appearance"
         bid="5ez,5ey":
-          bid="5ex,3os,5ew,3nm" href="https://www.google.lu/intl/en/about/products" button: "Google apps"
-          bid="3no,3nn" href: "Sign in Sign in"
+          bid="5ex,3os,5ew,3nm" button: "Google apps"
+          a bid="3no,3nn": "Sign in Sign in"
 c-wiz scroll-enabled:
   div:
   div:
     search:
       title: "Flight search"
       bid="3nu" combobox:
-        bid="3np"
         bid="3nr,3nq": "Round trip"
-        bid="3ns"
-        couldBeHidden
-          bid="5f2"
-        bid="3nt"
       button bid="3nv": "1 passenger, change number of passengers."
       bid="3o1" combobox:
-        bid="3nw"
         bid="3ny,3nx": "Economy"
-        bid="3nz"
-        couldBeHidden
-          bid="5f3"
-        bid="3o0"
       input bid="3o2" type="text" combobox label="Where from?": "New York"
       button bid="3o4,3o3": "Swap origin and destination."
       input bid="3o5" type="text" combobox label="Where to?": "London"
       input bid="3o6" type="text" placeholder="Departure": "Fri, May 1"
-      button bid="3o7"
-      button bid="3o8"
       input bid="3o9" type="text" placeholder="Return": "Thu, May 7"
-      button bid="3oa"
-      button bid="3ob"
       title: "Filters"
       button bid="3oc": "All filters"
       bid="3p1" scroll-enabled:
@@ -120,8 +106,6 @@ c-wiz scroll-enabled:
                 bid="3r6":
                   bid="3r4":
                     bid="3r3,3r2" text label="478 US dollars": "$478"
-                    hidden:
-                      bid="3r1"
                   bid="3r5": "round trip"
             button bid="3rb": "Flight details. Leaves John F. Kennedy International Airport at 8:30 PM on Friday, May 1 and arrives at London Gatwick Airport at 11:45 AM on Saturday, May 2."
           div:
@@ -145,8 +129,6 @@ c-wiz scroll-enabled:
                       bid="3rz,3ry": "LGW"
                 bid="3s7":
                   bid="3s5,3s4": "Nonstop flight."
-                  hidden:
-                    bid="3s6"
                 bid="3sf,3se":
                   bid="3s9,3s8": "348 kg CO2e"
                   bid="3sd":
@@ -155,8 +137,6 @@ c-wiz scroll-enabled:
                 bid="3sl":
                   bid="3sj":
                     bid="3si,3sh" text label="489 US dollars": "$489"
-                    hidden:
-                      bid="3sg"
                   bid="3sk": "round trip"
               bid="3ss":
                 bid="3sq": "as much CO2e as"
@@ -177,7 +157,6 @@ c-wiz scroll-enabled:
                       bid="3t5,3t4,3t3" text: "Arrival time: 7:45 PM. Arrival time: 7:45 PM."
                   bid="3tc":
                     bid="3t9": "British\n                                              Airways"
-                    bid="3ta"
                     bid="3tb": "Finnair, Iberia"
                 bid="3to":
                   bid="3te": "Total duration 6 hr 55 min."
@@ -188,8 +167,6 @@ c-wiz scroll-enabled:
                       bid="3tk,3tj": "LHR"
                 bid="3ts":
                   bid="3tq,3tp": "Nonstop flight."
-                  hidden:
-                    bid="3tr"
                 bid="3u0,3tz":
                   bid="3tu,3tt": "423 kg CO2e"
                   bid="3ty":
@@ -198,8 +175,6 @@ c-wiz scroll-enabled:
                 bid="3u6":
                   bid="3u4":
                     bid="3u3,3u2" text label="528 US dollars": "$528"
-                    hidden:
-                      bid="3u1"
                   bid="3u5": "round trip"
             button bid="3ub": "Flight details. Leaves John F. Kennedy International Airport at 7:50 AM on Friday, May 1 and arrives at Heathrow Airport at 7:45 PM on Friday, May 1."
         title: "Price insights"
@@ -207,7 +182,6 @@ c-wiz scroll-enabled:
           bid="3ui":
             bid="3uf,3ue,3ud,3uc" presentation
             bid="3uh,3ug": "Prices are currently typical"
-          bid="3uj"
           bid="3uk": "View price history"
           bid="3um,3ul": "View price history"
         region: "Find the best price"
@@ -219,25 +193,11 @@ c-wiz scroll-enabled:
             bid="3ut": "May 1 – 7"
             span:
               button bid="3v3" switch: "Track prices from New York to London departing 2026-05-01 and returning 2026-05-07"
-                bid="3uu"
-                bid="3v0,3uz":
-                  bid="3uw,3uv"
-                  bid="3ux"
-                  bid="3uy"
-                hidden:
-                  bid="3v2,3v1"
           "Track prices from New York to London - Any\n                                  dates"
           label:
             bid="3v4": "Any dates"
             span:
-              button bid="3ve" switch:
-                bid="3v5"
-                bid="3vb,3va":
-                  bid="3v7,3v6"
-                  bid="3v8"
-                  bid="3v9"
-                hidden:
-                  bid="3vd,3vc"
+              button bid="3ve" switch
           button bid="3vf":
             "Date grid"
           button bid="3vg":
@@ -275,8 +235,6 @@ c-wiz scroll-enabled:
                 bid="3wt":
                   bid="3wr":
                     bid="3wq,3wp" text label="459 US dollars": "$459"
-                    hidden:
-                      bid="3wo"
                   bid="3ws": "round trip"
             button bid="3wy": "Flight details. Leaves Newark Liberty International Airport at 8:25 PM on Friday, May 1 and arrives at London Gatwick Airport at 11:45 AM on Saturday, May 2."
           div:
@@ -310,8 +268,6 @@ c-wiz scroll-enabled:
                 bid="3yb":
                   bid="3y9":
                     bid="3y8,3y7" text label="461 US dollars": "$461"
-                    hidden:
-                      bid="3y6"
                   bid="3ya": "round trip"
             button bid="3yg": "Flight details. Leaves John F. Kennedy International Airport at 8:30 PM on Friday, May 1 and arrives at Heathrow Airport at 11:55 AM on Saturday, May 2."
           div:
@@ -345,8 +301,6 @@ c-wiz scroll-enabled:
                 bid="3zt":
                   bid="3zr":
                     bid="3zq,3zp" text label="478 US dollars": "$478"
-                    hidden:
-                      bid="3zo"
                   bid="3zs": "round trip"
             button bid="3zy": "Flight details. Leaves John F. Kennedy International Airport at 11:10 PM on Friday, May 1 and arrives at London Gatwick Airport at 2:40 PM on Saturday, May 2."
           div:
@@ -380,8 +334,6 @@ c-wiz scroll-enabled:
                 bid="41b":
                   bid="419":
                     bid="418,417" text label="512 US dollars": "$512"
-                    hidden:
-                      bid="416"
                   bid="41a": "round trip"
             button bid="41g": "Flight details. Leaves John F. Kennedy International Airport at 6:25 PM on Friday, May 1 and arrives at Heathrow Airport at 9:05 AM on Saturday, May 2."
           div:
@@ -397,7 +349,6 @@ c-wiz scroll-enabled:
                       bid="41q,41p,41o" text: "Arrival time: 9:40 PM. Arrival time: 9:40 PM."
                   bid="41x":
                     bid="41u": "American"
-                    bid="41v"
                     bid="41w": "Finnair, British Airways"
                 bid="429":
                   bid="41z": "Total duration 7 hr 5 min."
@@ -408,8 +359,6 @@ c-wiz scroll-enabled:
                       bid="425,424": "LHR"
                 bid="42d":
                   bid="42b,42a": "Nonstop flight."
-                  hidden:
-                    bid="42c"
                 bid="42l,42k":
                   bid="42f,42e": "377 kg CO2e"
                   bid="42j":
@@ -418,8 +367,6 @@ c-wiz scroll-enabled:
                 bid="42r":
                   bid="42p":
                     bid="42o,42n" text label="514 US dollars": "$514"
-                    hidden:
-                      bid="42m"
                   bid="42q": "round trip"
             button bid="42w": "Flight details. Leaves John F. Kennedy International Airport at 9:35 AM on Friday, May 1 and arrives at Heathrow Airport at 9:40 PM on Friday, May 1."
           div:
@@ -435,7 +382,6 @@ c-wiz scroll-enabled:
                       bid="437,436,435,434" text: "Arrival time: 6:25 AM on  Saturday, May 2. Arrival time: 6:25 AM on  Saturday, May 2. +1"
                   bid="43e":
                     bid="43b": "American"
-                    bid="43c"
                     bid="43d": "Finnair, British Airways"
                 bid="43q":
                   bid="43g": "Total duration 7 hr 5 min."
@@ -446,8 +392,6 @@ c-wiz scroll-enabled:
                       bid="43m,43l": "LHR"
                 bid="43u":
                   bid="43s,43r": "Nonstop flight."
-                  hidden:
-                    bid="43t"
                 bid="442,441":
                   bid="43w,43v": "377 kg CO2e"
                   bid="440":
@@ -456,8 +400,6 @@ c-wiz scroll-enabled:
                 bid="448":
                   bid="446":
                     bid="445,444" text label="514 US dollars": "$514"
-                    hidden:
-                      bid="443"
                   bid="447": "round trip"
             button bid="44d": "Flight details. Leaves John F. Kennedy International Airport at 6:20 PM on Friday, May 1 and arrives at Heathrow Airport at 6:25 AM on Saturday, May 2."
           div:
@@ -473,7 +415,6 @@ c-wiz scroll-enabled:
                       bid="44o,44n,44m,44l" text: "Arrival time: 7:20 AM on  Saturday, May 2. Arrival time: 7:20 AM on  Saturday, May 2. +1"
                   bid="44v":
                     bid="44s": "American"
-                    bid="44t"
                     bid="44u": "Finnair, British Airways"
                 bid="457":
                   bid="44x": "Total duration 7 hr."
@@ -484,8 +425,6 @@ c-wiz scroll-enabled:
                       bid="453,452": "LHR"
                 bid="45b":
                   bid="459,458": "Nonstop flight."
-                  hidden:
-                    bid="45a"
                 bid="45j,45i":
                   bid="45d,45c": "283 kg CO2e"
                   bid="45h":
@@ -494,8 +433,6 @@ c-wiz scroll-enabled:
                 bid="45p":
                   bid="45n":
                     bid="45m,45l" text label="514 US dollars": "$514"
-                    hidden:
-                      bid="45k"
                   bid="45o": "round trip"
             button bid="45u": "Flight details. Leaves John F. Kennedy International Airport at 7:20 PM on Friday, May 1 and arrives at Heathrow Airport at 7:20 AM on Saturday, May 2."
           div:
@@ -511,7 +448,6 @@ c-wiz scroll-enabled:
                       bid="464,463,462" text: "Arrival time: 8:40 PM. Arrival time: 8:40 PM."
                   bid="46b":
                     bid="468": "United"
-                    bid="469"
                     bid="46a": "Austrian"
                 bid="46n":
                   bid="46d": "Total duration 7 hr 15 min."
@@ -522,8 +458,6 @@ c-wiz scroll-enabled:
                       bid="46j,46i": "LHR"
                 bid="46r":
                   bid="46p,46o": "Nonstop flight."
-                  hidden:
-                    bid="46q"
                 bid="46z,46y":
                   bid="46t,46s": "376 kg CO2e"
                   bid="46x":
@@ -532,8 +466,6 @@ c-wiz scroll-enabled:
                 bid="475":
                   bid="473":
                     bid="472,471" text label="526 US dollars": "$526"
-                    hidden:
-                      bid="470"
                   bid="474": "round trip"
             button bid="47a": "Flight details. Leaves Newark Liberty International Airport at 8:25 AM on Friday, May 1 and arrives at Heathrow Airport at 8:40 PM on Friday, May 1."
           div:
@@ -557,8 +489,6 @@ c-wiz scroll-enabled:
                       bid="47x,47w": "LHR"
                 bid="485":
                   bid="483,482": "Nonstop flight."
-                  hidden:
-                    bid="484"
                 bid="48d,48c":
                   bid="487,486": "376 kg CO2e"
                   bid="48b":
@@ -567,8 +497,6 @@ c-wiz scroll-enabled:
                 bid="48j":
                   bid="48h":
                     bid="48g,48f" text label="526 US dollars": "$526"
-                    hidden:
-                      bid="48e"
                   bid="48i": "round trip"
             button bid="48o": "Flight details. Leaves Newark Liberty International Airport at 9:20 AM on Friday, May 1 and arrives at Heathrow Airport at 9:35 PM on Friday, May 1."
           div:
@@ -584,7 +512,6 @@ c-wiz scroll-enabled:
                       bid="48z,48y,48x,48w" text: "Arrival time: 5:55 AM on  Saturday, May 2. Arrival time: 5:55 AM on  Saturday, May 2. +1"
                   bid="496":
                     bid="493": "United"
-                    bid="494"
                     bid="495": "Austrian"
                 bid="49i":
                   bid="498": "Total duration 7 hr 30 min."
@@ -595,8 +522,6 @@ c-wiz scroll-enabled:
                       bid="49e,49d": "LHR"
                 bid="49m":
                   bid="49k,49j": "Nonstop flight."
-                  hidden:
-                    bid="49l"
                 bid="49u,49t":
                   bid="49o,49n": "376 kg CO2e"
                   bid="49s":
@@ -605,8 +530,6 @@ c-wiz scroll-enabled:
                 bid="4a0":
                   bid="49y":
                     bid="49x,49w" text label="526 US dollars": "$526"
-                    hidden:
-                      bid="49v"
                   bid="49z": "round trip"
             button bid="4a5": "Flight details. Leaves Newark Liberty International Airport at 5:25 PM on Friday, May 1 and arrives at Heathrow Airport at 5:55 AM on Saturday, May 2."
           div:
@@ -630,8 +553,6 @@ c-wiz scroll-enabled:
                       bid="4at,4as": "LHR"
                 bid="4b1":
                   bid="4az,4ay": "Nonstop flight."
-                  hidden:
-                    bid="4b0"
                 bid="4b9,4b8":
                   bid="4b3,4b2": "376 kg CO2e"
                   bid="4b7":
@@ -640,8 +561,6 @@ c-wiz scroll-enabled:
                 bid="4bf":
                   bid="4bd":
                     bid="4bc,4bb" text label="526 US dollars": "$526"
-                    hidden:
-                      bid="4ba"
                   bid="4be": "round trip"
             button bid="4bk": "Flight details. Leaves Newark Liberty International Airport at 7:50 PM on Friday, May 1 and arrives at Heathrow Airport at 8:20 AM on Saturday, May 2."
           div:
@@ -657,7 +576,6 @@ c-wiz scroll-enabled:
                       bid="4bv,4bu,4bt,4bs" text: "Arrival time: 9:20 AM on  Saturday, May 2. Arrival time: 9:20 AM on  Saturday, May 2. +1"
                   bid="4c2":
                     bid="4bz": "United"
-                    bid="4c0"
                     bid="4c1": "Austrian"
                 bid="4ce":
                   bid="4c4": "Total duration 7 hr 35 min."
@@ -668,8 +586,6 @@ c-wiz scroll-enabled:
                       bid="4ca,4c9": "LHR"
                 bid="4ci":
                   bid="4cg,4cf": "Nonstop flight."
-                  hidden:
-                    bid="4ch"
                 bid="4cq,4cp":
                   bid="4ck,4cj": "376 kg CO2e"
                   bid="4co":
@@ -678,8 +594,6 @@ c-wiz scroll-enabled:
                 bid="4cw":
                   bid="4cu":
                     bid="4ct,4cs" text label="526 US dollars": "$526"
-                    hidden:
-                      bid="4cr"
                   bid="4cv": "round trip"
             button bid="4d1": "Flight details. Leaves Newark Liberty International Airport at 8:45 PM on Friday, May 1 and arrives at Heathrow Airport at 9:20 AM on Saturday, May 2."
           div:
@@ -695,7 +609,6 @@ c-wiz scroll-enabled:
                       bid="4dc,4db,4da,4d9" text: "Arrival time: 10:25 AM on  Saturday, May 2. Arrival time: 10:25 AM on  Saturday, May 2. +1"
                   bid="4dj":
                     bid="4dg": "United"
-                    bid="4dh"
                     bid="4di": "Austrian"
                 bid="4dv":
                   bid="4dl": "Total duration 7 hr 25 min."
@@ -706,8 +619,6 @@ c-wiz scroll-enabled:
                       bid="4dr,4dq": "LHR"
                 bid="4dz":
                   bid="4dx,4dw": "Nonstop flight."
-                  hidden:
-                    bid="4dy"
                 bid="4e7,4e6":
                   bid="4e1,4e0": "376 kg CO2e"
                   bid="4e5":
@@ -716,8 +627,6 @@ c-wiz scroll-enabled:
                 bid="4ed":
                   bid="4eb":
                     bid="4ea,4e9" text label="526 US dollars": "$526"
-                    hidden:
-                      bid="4e8"
                   bid="4ec": "round trip"
             button bid="4ei": "Flight details. Leaves Newark Liberty International Airport at 10:00 PM on Friday, May 1 and arrives at Heathrow Airport at 10:25 AM on Saturday, May 2."
           div:
@@ -733,7 +642,6 @@ c-wiz scroll-enabled:
                       bid="4et,4es,4er,4eq" text: "Arrival time: 6:50 AM on  Saturday, May 2. Arrival time: 6:50 AM on  Saturday, May 2. +1"
                   bid="4f0":
                     bid="4ex": "British\n                                              Airways"
-                    bid="4ey"
                     bid="4ez": "Finnair"
                 bid="4fc":
                   bid="4f2": "Total duration 7 hr 5 min."
@@ -744,8 +652,6 @@ c-wiz scroll-enabled:
                       bid="4f8,4f7": "LHR"
                 bid="4fg":
                   bid="4fe,4fd": "Nonstop flight."
-                  hidden:
-                    bid="4ff"
                 bid="4fo,4fn":
                   bid="4fi,4fh": "385 kg CO2e"
                   bid="4fm":
@@ -754,8 +660,6 @@ c-wiz scroll-enabled:
                 bid="4fu":
                   bid="4fs":
                     bid="4fr,4fq" text label="528 US dollars": "$528"
-                    hidden:
-                      bid="4fp"
                   bid="4ft": "round trip"
             button bid="4fz": "Flight details. Leaves John F. Kennedy International Airport at 6:45 PM on Friday, May 1 and arrives at Heathrow Airport at 6:50 AM on Saturday, May 2."
           div:
@@ -771,7 +675,6 @@ c-wiz scroll-enabled:
                       bid="4ga,4g9,4g8,4g7" text: "Arrival time: 7:45 AM on  Saturday, May 2. Arrival time: 7:45 AM on  Saturday, May 2. +1"
                   bid="4gh":
                     bid="4ge": "British\n                                              Airways"
-                    bid="4gf"
                     bid="4gg": "Finnair"
                 bid="4gt":
                   bid="4gj": "Total duration 7 hr 15 min."
@@ -782,8 +685,6 @@ c-wiz scroll-enabled:
                       bid="4gp,4go": "LHR"
                 bid="4gx":
                   bid="4gv,4gu": "Nonstop flight."
-                  hidden:
-                    bid="4gw"
                 bid="4h5,4h4":
                   bid="4gz,4gy": "423 kg CO2e"
                   bid="4h3":
@@ -792,8 +693,6 @@ c-wiz scroll-enabled:
                 bid="4hb":
                   bid="4h9":
                     bid="4h8,4h7" text label="528 US dollars": "$528"
-                    hidden:
-                      bid="4h6"
                   bid="4ha": "round trip"
             button bid="4hg": "Flight details. Leaves John F. Kennedy International Airport at 7:30 PM on Friday, May 1 and arrives at Heathrow Airport at 7:45 AM on Saturday, May 2."
           div:
@@ -809,7 +708,6 @@ c-wiz scroll-enabled:
                       bid="4hr,4hq,4hp,4ho" text: "Arrival time: 9:10 AM on  Saturday, May 2. Arrival time: 9:10 AM on  Saturday, May 2. +1"
                   bid="4hy":
                     bid="4hv": "British\n                                              Airways"
-                    bid="4hw"
                     bid="4hx": "Finnair"
                 bid="4ia":
                   bid="4i0": "Total duration 7 hr 15 min."
@@ -820,8 +718,6 @@ c-wiz scroll-enabled:
                       bid="4i6,4i5": "LHR"
                 bid="4ie":
                   bid="4ic,4ib": "Nonstop flight."
-                  hidden:
-                    bid="4id"
                 bid="4im,4il":
                   bid="4ig,4if": "423 kg CO2e"
                   bid="4ik":
@@ -830,8 +726,6 @@ c-wiz scroll-enabled:
                 bid="4is":
                   bid="4iq":
                     bid="4ip,4io" text label="528 US dollars": "$528"
-                    hidden:
-                      bid="4in"
                   bid="4ir": "round trip"
             button bid="4ix": "Flight details. Leaves John F. Kennedy International Airport at 8:55 PM on Friday, May 1 and arrives at Heathrow Airport at 9:10 AM on Saturday, May 2."
           div:
@@ -847,7 +741,6 @@ c-wiz scroll-enabled:
                       bid="4j7,4j6,4j5" text: "Arrival time: 8:10 PM. Arrival time: 8:10 PM."
                   bid="4je":
                     bid="4jb": "Virgin\n                                              Atlantic"
-                    bid="4jc"
                     bid="4jd": "Air France, KLM"
                 bid="4jq":
                   bid="4jg": "Total duration 6 hr 55 min."
@@ -858,8 +751,6 @@ c-wiz scroll-enabled:
                       bid="4jm,4jl": "LHR"
                 bid="4ju":
                   bid="4js,4jr": "Nonstop flight."
-                  hidden:
-                    bid="4jt"
                 bid="4k2,4k1":
                   bid="4jw,4jv": "340 kg CO2e"
                   bid="4k0":
@@ -868,8 +759,6 @@ c-wiz scroll-enabled:
                 bid="4k8":
                   bid="4k6":
                     bid="4k5,4k4" text label="537 US dollars": "$537"
-                    hidden:
-                      bid="4k3"
                   bid="4k7": "round trip"
             button bid="4kd": "Flight details. Leaves John F. Kennedy International Airport at 8:15 AM on Friday, May 1 and arrives at Heathrow Airport at 8:10 PM on Friday, May 1."
           div:
@@ -885,7 +774,6 @@ c-wiz scroll-enabled:
                       bid="4ko,4kn,4km,4kl" text: "Arrival time: 6:20 AM on  Saturday, May 2. Arrival time: 6:20 AM on  Saturday, May 2. +1"
                   bid="4kv":
                     bid="4ks": "Virgin\n                                              Atlantic"
-                    bid="4kt"
                     bid="4ku": "Air France, KLM"
                 bid="4l7":
                   bid="4kx": "Total duration 7 hr 20 min."
@@ -896,8 +784,6 @@ c-wiz scroll-enabled:
                       bid="4l3,4l2": "LHR"
                 bid="4lb":
                   bid="4l9,4l8": "Nonstop flight."
-                  hidden:
-                    bid="4la"
                 bid="4lj,4li":
                   bid="4ld,4lc": "335 kg CO2e"
                   bid="4lh":
@@ -906,8 +792,6 @@ c-wiz scroll-enabled:
                 bid="4lp":
                   bid="4ln":
                     bid="4lm,4ll" text label="537 US dollars": "$537"
-                    hidden:
-                      bid="4lk"
                   bid="4lo": "round trip"
             button bid="4lu": "Flight details. Leaves John F. Kennedy International Airport at 6:00 PM on Friday, May 1 and arrives at Heathrow Airport at 6:20 AM on Saturday, May 2."
           div:
@@ -923,7 +807,6 @@ c-wiz scroll-enabled:
                       bid="4m5,4m4,4m3,4m2" text: "Arrival time: 6:45 AM on  Saturday, May 2. Arrival time: 6:45 AM on  Saturday, May 2. +1"
                   bid="4mc":
                     bid="4m9": "Virgin\n                                              Atlantic"
-                    bid="4ma"
                     bid="4mb": "Air France, KLM"
                 bid="4mo":
                   bid="4me": "Total duration 7 hr 15 min."
@@ -934,8 +817,6 @@ c-wiz scroll-enabled:
                       bid="4mk,4mj": "LHR"
                 bid="4ms":
                   bid="4mq,4mp": "Nonstop flight."
-                  hidden:
-                    bid="4mr"
                 bid="4n0,4mz":
                   bid="4mu,4mt": "335 kg CO2e"
                   bid="4my":
@@ -944,8 +825,6 @@ c-wiz scroll-enabled:
                 bid="4n6":
                   bid="4n4":
                     bid="4n3,4n2" text label="537 US dollars": "$537"
-                    hidden:
-                      bid="4n1"
                   bid="4n5": "round trip"
             button bid="4nb": "Flight details. Leaves John F. Kennedy International Airport at 6:30 PM on Friday, May 1 and arrives at Heathrow Airport at 6:45 AM on Saturday, May 2."
           div:
@@ -961,7 +840,6 @@ c-wiz scroll-enabled:
                       bid="4nm,4nl,4nk,4nj" text: "Arrival time: 7:15 AM on  Saturday, May 2. Arrival time: 7:15 AM on  Saturday, May 2. +1"
                   bid="4nt":
                     bid="4nq": "Virgin\n                                              Atlantic"
-                    bid="4nr"
                     bid="4ns": "Air France, KLM"
                 bid="4o5":
                   bid="4nv": "Total duration 7 hr 15 min."
@@ -972,8 +850,6 @@ c-wiz scroll-enabled:
                       bid="4o1,4o0": "LHR"
                 bid="4o9":
                   bid="4o7,4o6": "Nonstop flight."
-                  hidden:
-                    bid="4o8"
                 bid="4oh,4og":
                   bid="4ob,4oa": "335 kg CO2e"
                   bid="4of":
@@ -982,8 +858,6 @@ c-wiz scroll-enabled:
                 bid="4on":
                   bid="4ol":
                     bid="4ok,4oj" text label="537 US dollars": "$537"
-                    hidden:
-                      bid="4oi"
                   bid="4om": "round trip"
             button bid="4os": "Flight details. Leaves John F. Kennedy International Airport at 7:00 PM on Friday, May 1 and arrives at Heathrow Airport at 7:15 AM on Saturday, May 2."
           div:
@@ -999,7 +873,6 @@ c-wiz scroll-enabled:
                       bid="4p3,4p2,4p1,4p0" text: "Arrival time: 8:50 AM on  Saturday, May 2. Arrival time: 8:50 AM on  Saturday, May 2. +1"
                   bid="4pa":
                     bid="4p7": "Virgin\n                                              Atlantic"
-                    bid="4p8"
                     bid="4p9": "Air France, KLM"
                 bid="4pm":
                   bid="4pc": "Total duration 7 hr 5 min."
@@ -1010,8 +883,6 @@ c-wiz scroll-enabled:
                       bid="4pi,4ph": "LHR"
                 bid="4pq":
                   bid="4po,4pn": "Nonstop flight."
-                  hidden:
-                    bid="4pp"
                 bid="4py,4px":
                   bid="4ps,4pr": "335 kg CO2e"
                   bid="4pw":
@@ -1020,8 +891,6 @@ c-wiz scroll-enabled:
                 bid="4q4":
                   bid="4q2":
                     bid="4q1,4q0" text label="537 US dollars": "$537"
-                    hidden:
-                      bid="4pz"
                   bid="4q3": "round trip"
             button bid="4q9": "Flight details. Leaves John F. Kennedy International Airport at 8:45 PM on Friday, May 1 and arrives at Heathrow Airport at 8:50 AM on Saturday, May 2."
           div:
@@ -1037,7 +906,6 @@ c-wiz scroll-enabled:
                       bid="4qk,4qj,4qi,4qh" text: "Arrival time: 10:20 AM on  Saturday, May 2. Arrival time: 10:20 AM on  Saturday, May 2. +1"
                   bid="4qr":
                     bid="4qo": "Delta"
-                    bid="4qp"
                     bid="4qq": "Air France, KLM"
                 bid="4r3":
                   bid="4qt": "Total duration 7 hr 20 min."
@@ -1048,8 +916,6 @@ c-wiz scroll-enabled:
                       bid="4qz,4qy": "LHR"
                 bid="4r7":
                   bid="4r5,4r4": "Nonstop flight."
-                  hidden:
-                    bid="4r6"
                 bid="4rf,4re":
                   bid="4r9,4r8": "345 kg CO2e"
                   bid="4rd":
@@ -1058,8 +924,6 @@ c-wiz scroll-enabled:
                 bid="4rl":
                   bid="4rj":
                     bid="4ri,4rh" text label="537 US dollars": "$537"
-                    hidden:
-                      bid="4rg"
                   bid="4rk": "round trip"
             button bid="4rq": "Flight details. Leaves John F. Kennedy International Airport at 10:00 PM on Friday, May 1 and arrives at Heathrow Airport at 10:20 AM on Saturday, May 2."
           div:
@@ -1075,7 +939,6 @@ c-wiz scroll-enabled:
                       bid="4s1,4s0,4rz,4ry" text: "Arrival time: 12:05 PM on  Saturday, May 2. Arrival time: 12:05 PM on  Saturday, May 2. +1"
                   bid="4s8":
                     bid="4s5": "Virgin\n                                              Atlantic"
-                    bid="4s6"
                     bid="4s7": "Air France, KLM"
                 bid="4sk":
                   bid="4sa": "Total duration 7 hr 25 min."
@@ -1086,8 +949,6 @@ c-wiz scroll-enabled:
                       bid="4sg,4sf": "LHR"
                 bid="4so":
                   bid="4sm,4sl": "Nonstop flight."
-                  hidden:
-                    bid="4sn"
                 bid="4sw,4sv":
                   bid="4sq,4sp": "352 kg CO2e"
                   bid="4su":
@@ -1096,8 +957,6 @@ c-wiz scroll-enabled:
                 bid="4t2":
                   bid="4t0":
                     bid="4sz,4sy" text label="537 US dollars": "$537"
-                    hidden:
-                      bid="4sx"
                   bid="4t1": "round trip"
             button bid="4t7": "Flight details. Leaves John F. Kennedy International Airport at 11:40 PM on Friday, May 1 and arrives at Heathrow Airport at 12:05 PM on Saturday, May 2."
           div:
@@ -1113,7 +972,6 @@ c-wiz scroll-enabled:
                       bid="4ti,4th,4tg,4tf" text: "Arrival time: 9:40 AM on  Saturday, May 2. Arrival time: 9:40 AM on  Saturday, May 2. +1"
                   bid="4tp":
                     bid="4tm": "British\n                                              Airways"
-                    bid="4tn"
                     bid="4to": "Finnair"
                 bid="4u1":
                   bid="4tr": "Total duration 7 hr 10 min."
@@ -1124,8 +982,6 @@ c-wiz scroll-enabled:
                       bid="4tx,4tw": "LHR"
                 bid="4u5":
                   bid="4u3,4u2": "Nonstop flight."
-                  hidden:
-                    bid="4u4"
                 bid="4ud,4uc":
                   bid="4u7,4u6": "423 kg CO2e"
                   bid="4ub":
@@ -1134,8 +990,6 @@ c-wiz scroll-enabled:
                 bid="4uj":
                   bid="4uh":
                     bid="4ug,4uf" text label="543 US dollars": "$543"
-                    hidden:
-                      bid="4ue"
                   bid="4ui": "round trip"
             button bid="4uo": "Flight details. Leaves John F. Kennedy International Airport at 9:30 PM on Friday, May 1 and arrives at Heathrow Airport at 9:40 AM on Saturday, May 2."
           div:
@@ -1151,7 +1005,6 @@ c-wiz scroll-enabled:
                       bid="4uz,4uy,4ux,4uw" text: "Arrival time: 10:40 AM on  Saturday, May 2. Arrival time: 10:40 AM on  Saturday, May 2. +1"
                   bid="4v6":
                     bid="4v3": "United"
-                    bid="4v4"
                     bid="4v5": "Operated by Republic Airways\n                                              DBA United Express"
                 bid="4vi":
                   bid="4v8": "Total duration 10 hr 11 min."
@@ -1172,8 +1025,6 @@ c-wiz scroll-enabled:
                 bid="4w3":
                   bid="4w1":
                     bid="4w0,4vz" text label="548 US dollars": "$548"
-                    hidden:
-                      bid="4vy"
                   bid="4w2": "round trip"
             button bid="4w8": "Flight details. Leaves LaGuardia Airport at 7:29 PM on Friday, May 1 and arrives at Heathrow Airport at 10:40 AM on Saturday, May 2."
           div:
@@ -1189,7 +1040,6 @@ c-wiz scroll-enabled:
                       bid="4wj,4wi,4wh,4wg" text: "Arrival time: 6:30 AM on  Saturday, May 2. Arrival time: 6:30 AM on  Saturday, May 2. +1"
                   bid="4wq":
                     bid="4wn": "British\n                                              Airways"
-                    bid="4wo"
                     bid="4wp": "Finnair"
                 bid="4x2":
                   bid="4ws": "Total duration 7 hr."
@@ -1200,8 +1050,6 @@ c-wiz scroll-enabled:
                       bid="4wy,4wx": "LHR"
                 bid="4x6":
                   bid="4x4,4x3": "Nonstop flight."
-                  hidden:
-                    bid="4x5"
                 bid="4xe,4xd":
                   bid="4x8,4x7": "385 kg CO2e"
                   bid="4xc":
@@ -1210,8 +1058,6 @@ c-wiz scroll-enabled:
                 bid="4xk":
                   bid="4xi":
                     bid="4xh,4xg" text label="558 US dollars": "$558"
-                    hidden:
-                      bid="4xf"
                   bid="4xj": "round trip"
             button bid="4xp": "Flight details. Leaves John F. Kennedy International Airport at 6:30 PM on Friday, May 1 and arrives at Heathrow Airport at 6:30 AM on Saturday, May 2."
           div:
@@ -1227,7 +1073,6 @@ c-wiz scroll-enabled:
                       bid="4y0,4xz,4xy,4xx" text: "Arrival time: 7:20 AM on  Saturday, May 2. Arrival time: 7:20 AM on  Saturday, May 2. +1"
                   bid="4y7":
                     bid="4y4": "British\n                                              Airways"
-                    bid="4y5"
                     bid="4y6": "Finnair"
                 bid="4yj":
                   bid="4y9": "Total duration 7 hr 10 min."
@@ -1238,8 +1083,6 @@ c-wiz scroll-enabled:
                       bid="4yf,4ye": "LHR"
                 bid="4yn":
                   bid="4yl,4yk": "Nonstop flight."
-                  hidden:
-                    bid="4ym"
                 bid="4yv,4yu":
                   bid="4yp,4yo": "385 kg CO2e"
                   bid="4yt":
@@ -1248,8 +1091,6 @@ c-wiz scroll-enabled:
                 bid="4z1":
                   bid="4yz":
                     bid="4yy,4yx" text label="573 US dollars": "$573"
-                    hidden:
-                      bid="4yw"
                   bid="4z0": "round trip"
             button bid="4z6": "Flight details. Leaves John F. Kennedy International Airport at 7:10 PM on Friday, May 1 and arrives at Heathrow Airport at 7:20 AM on Saturday, May 2."
           div:
@@ -1265,7 +1106,6 @@ c-wiz scroll-enabled:
                       bid="4zh,4zg,4zf,4ze" text: "Arrival time: 8:15 AM on  Saturday, May 2. Arrival time: 8:15 AM on  Saturday, May 2. +1"
                   bid="4zo":
                     bid="4zl": "British\n                                              Airways"
-                    bid="4zm"
                     bid="4zn": "Finnair"
                 bid="500":
                   bid="4zq": "Total duration 7 hr 10 min."
@@ -1276,8 +1116,6 @@ c-wiz scroll-enabled:
                       bid="4zw,4zv": "LHR"
                 bid="504":
                   bid="502,501": "Nonstop flight."
-                  hidden:
-                    bid="503"
                 bid="50c,50b":
                   bid="506,505": "385 kg CO2e"
                   bid="50a":
@@ -1286,8 +1124,6 @@ c-wiz scroll-enabled:
                 bid="50i":
                   bid="50g":
                     bid="50f,50e" text label="603 US dollars": "$603"
-                    hidden:
-                      bid="50d"
                   bid="50h": "round trip"
             button bid="50n": "Flight details. Leaves John F. Kennedy International Airport at 8:05 PM on Friday, May 1 and arrives at Heathrow Airport at 8:15 AM on Saturday, May 2."
           div:
@@ -1303,7 +1139,6 @@ c-wiz scroll-enabled:
                       bid="50y,50x,50w,50v" text: "Arrival time: 9:30 AM on  Saturday, May 2. Arrival time: 9:30 AM on  Saturday, May 2. +1"
                   bid="515":
                     bid="512": "British\n                                              Airways"
-                    bid="513"
                     bid="514": "Finnair, Iberia"
                 bid="51h":
                   bid="517": "Total duration 7 hr 5 min."
@@ -1314,8 +1149,6 @@ c-wiz scroll-enabled:
                       bid="51d,51c": "LHR"
                 bid="51l":
                   bid="51j,51i": "Nonstop flight."
-                  hidden:
-                    bid="51k"
                 bid="51t,51s":
                   bid="51n,51m": "298 kg CO2e"
                   bid="51r":
@@ -1324,8 +1157,6 @@ c-wiz scroll-enabled:
                 bid="51z":
                   bid="51x":
                     bid="51w,51v" text label="603 US dollars": "$603"
-                    hidden:
-                      bid="51u"
                   bid="51y": "round trip"
             button bid="524": "Flight details. Leaves Newark Liberty International Airport at 9:25 PM on Friday, May 1 and arrives at Heathrow Airport at 9:30 AM on Saturday, May 2."
           div:
@@ -1341,7 +1172,6 @@ c-wiz scroll-enabled:
                       bid="52f,52e,52d,52c" text: "Arrival time: 10:35 AM on  Saturday, May 2. Arrival time: 10:35 AM on  Saturday, May 2. +1"
                   bid="52m":
                     bid="52j": "British\n                                              Airways"
-                    bid="52k"
                     bid="52l": "Finnair"
                 bid="52y":
                   bid="52o": "Total duration 6 hr 55 min."
@@ -1352,8 +1182,6 @@ c-wiz scroll-enabled:
                       bid="52u,52t": "LHR"
                 bid="532":
                   bid="530,52z": "Nonstop flight."
-                  hidden:
-                    bid="531"
                 bid="53a,539":
                   bid="534,533": "297 kg CO2e"
                   bid="538":
@@ -1362,8 +1190,6 @@ c-wiz scroll-enabled:
                 bid="53g":
                   bid="53e":
                     bid="53d,53c" text label="603 US dollars": "$603"
-                    hidden:
-                      bid="53b"
                   bid="53f": "round trip"
             button bid="53l": "Flight details. Leaves John F. Kennedy International Airport at 10:40 PM on Friday, May 1 and arrives at Heathrow Airport at 10:35 AM on Saturday, May 2."
           div:
@@ -1387,8 +1213,6 @@ c-wiz scroll-enabled:
                       bid="548,547": "LHR"
                 bid="54g":
                   bid="54e,54d": "Nonstop flight."
-                  hidden:
-                    bid="54f"
                 bid="54o,54n":
                   bid="54i,54h": "546 kg CO2e"
                   bid="54m":
@@ -1397,8 +1221,6 @@ c-wiz scroll-enabled:
                 bid="54u":
                   bid="54s":
                     bid="54r,54q" text label="606 US dollars": "$606"
-                    hidden:
-                      bid="54p"
                   bid="54t": "round trip"
             button bid="54z": "Flight details. Leaves John F. Kennedy International Airport at 8:45 AM on Friday, May 1 and arrives at Heathrow Airport at 8:45 PM on Friday, May 1."
           div:
@@ -1414,7 +1236,6 @@ c-wiz scroll-enabled:
                       bid="55a,559,558,557" text: "Arrival time: 1:45 PM on  Sunday, May 3. Arrival time: 1:45 PM on  Sunday, May 3. +2"
                   bid="55h":
                     bid="55e": "SWISS"
-                    bid="55f"
                     bid="55g": "Operated by Helvetic"
                 bid="55t":
                   bid="55j": "Total duration 37 hr 20 min."
@@ -1427,7 +1248,6 @@ c-wiz scroll-enabled:
                   bid="55z":
                     bid="55u": "2 stops flight."
                     bid="55y,55x":
-                      bid="55w,55v"
                   bid="566" label="Layover (1 of 2) is a 11 hr 5 min layover at Geneva Airport in Geneva. Layover (2 of 2) is a 15 hr 50 min overnight layover at Zurich Airport in Zürich.": ","
                     bid="562":
                       bid="561,560": "GVA"
@@ -1441,8 +1261,6 @@ c-wiz scroll-enabled:
                 bid="56l":
                   bid="56j":
                     bid="56i,56h" text label="614 US dollars": "$614"
-                    hidden:
-                      bid="56g"
                   bid="56k": "round trip"
             button bid="56q": "Flight details. Leaves John F. Kennedy International Airport at 7:25 PM on Friday, May 1 and arrives at London City Airport at 1:45 PM on Sunday, May 3."
           div:
@@ -1458,7 +1276,6 @@ c-wiz scroll-enabled:
                       bid="571,570,56z,56y" text: "Arrival time: 1:45 PM on  Sunday, May 3. Arrival time: 1:45 PM on  Sunday, May 3. +2"
                   bid="578":
                     bid="575": "SWISS"
-                    bid="576"
                     bid="577": "Operated by Helvetic"
                 bid="57k":
                   bid="57a": "Total duration 37 hr 20 min."
@@ -1471,7 +1288,6 @@ c-wiz scroll-enabled:
                   bid="57q":
                     bid="57l": "2 stops flight."
                     bid="57p,57o":
-                      bid="57n,57m"
                   bid="57x" label="Layover (1 of 2) is a 9 hr 30 min layover at Geneva Airport in Geneva. Layover (2 of 2) is a 17 hr 25 min overnight layover at Zurich Airport in Zürich.": ","
                     bid="57t":
                       bid="57s,57r": "GVA"
@@ -1485,8 +1301,6 @@ c-wiz scroll-enabled:
                 bid="58c":
                   bid="58a":
                     bid="589,588" text label="614 US dollars": "$614"
-                    hidden:
-                      bid="587"
                   bid="58b": "round trip"
             button bid="58h": "Flight details. Leaves John F. Kennedy International Airport at 7:25 PM on Friday, May 1 and arrives at London City Airport at 1:45 PM on Sunday, May 3."
           div:
@@ -1502,7 +1316,6 @@ c-wiz scroll-enabled:
                       bid="58s,58r,58q,58p" text: "Arrival time: 8:50 AM on  Saturday, May 2. Arrival time: 8:50 AM on  Saturday, May 2. +1"
                   bid="58z":
                     bid="58w": "Delta"
-                    bid="58x"
                     bid="58y": "KLM"
                 bid="59b":
                   bid="591": "Total duration 7 hr 35 min."
@@ -1513,8 +1326,6 @@ c-wiz scroll-enabled:
                       bid="597,596": "LHR"
                 bid="59f":
                   bid="59d,59c": "Nonstop flight."
-                  hidden:
-                    bid="59e"
                 bid="59n,59m":
                   bid="59h,59g": "428 kg CO2e"
                   bid="59l":
@@ -1523,8 +1334,6 @@ c-wiz scroll-enabled:
                 bid="59t":
                   bid="59r":
                     bid="59q,59p" text label="618 US dollars": "$618"
-                    hidden:
-                      bid="59o"
                   bid="59s": "round trip"
             button bid="59y": "Flight details. Leaves John F. Kennedy International Airport at 8:15 PM on Friday, May 1 and arrives at Heathrow Airport at 8:50 AM on Saturday, May 2."
           div:
@@ -1540,7 +1349,6 @@ c-wiz scroll-enabled:
                       bid="5a9,5a8,5a7,5a6" text: "Arrival time: 9:30 AM on  Saturday, May 2. Arrival time: 9:30 AM on  Saturday, May 2. +1"
                   bid="5ag":
                     bid="5ad": "JetBlue"
-                    bid="5ae"
                     bid="5af": "Tap Air Portugal"
                 bid="5as":
                   bid="5ai": "Total duration 7 hr 38 min."
@@ -1551,8 +1359,6 @@ c-wiz scroll-enabled:
                       bid="5ao,5an": "LHR"
                 bid="5aw":
                   bid="5au,5at": "Nonstop flight."
-                  hidden:
-                    bid="5av"
                 bid="5b4,5b3":
                   bid="5ay,5ax": "546 kg CO2e"
                   bid="5b2":
@@ -1561,8 +1367,6 @@ c-wiz scroll-enabled:
                 bid="5ba":
                   bid="5b8":
                     bid="5b7,5b6" text label="624 US dollars": "$624"
-                    hidden:
-                      bid="5b5"
                   bid="5b9": "round trip"
             button bid="5bf": "Flight details. Leaves John F. Kennedy International Airport at 8:52 PM on Friday, May 1 and arrives at Heathrow Airport at 9:30 AM on Saturday, May 2."
           div:
@@ -1578,7 +1382,6 @@ c-wiz scroll-enabled:
                       bid="5bq,5bp,5bo,5bn" text: "Arrival time: 5:50 AM on  Saturday, May 2. Arrival time: 5:50 AM on  Saturday, May 2. +1"
                   bid="5bx":
                     bid="5bu": "British\n                                              Airways"
-                    bid="5bv"
                     bid="5bw": "Finnair, Iberia"
                 bid="5c9":
                   bid="5bz": "Total duration 7 hr."
@@ -1589,8 +1392,6 @@ c-wiz scroll-enabled:
                       bid="5c5,5c4": "LHR"
                 bid="5cd":
                   bid="5cb,5ca": "Nonstop flight."
-                  hidden:
-                    bid="5cc"
                 bid="5cl,5ck":
                   bid="5cf,5ce": "425 kg CO2e"
                   bid="5cj":
@@ -1599,8 +1400,6 @@ c-wiz scroll-enabled:
                 bid="5cr":
                   bid="5cp":
                     bid="5co,5cn" text label="674 US dollars": "$674"
-                    hidden:
-                      bid="5cm"
                   bid="5cq": "round trip"
             button bid="5cw": "Flight details. Leaves Newark Liberty International Airport at 5:50 PM on Friday, May 1 and arrives at Heathrow Airport at 5:50 AM on Saturday, May 2."
           div:
@@ -1616,7 +1415,6 @@ c-wiz scroll-enabled:
                       bid="5d7,5d6,5d5,5d4" text: "Arrival time: 7:15 AM on  Saturday, May 2. Arrival time: 7:15 AM on  Saturday, May 2. +1"
                   bid="5de":
                     bid="5db": "United"
-                    bid="5dc"
                     bid="5dd": "Austrian"
                 bid="5dq":
                   bid="5dg": "Total duration 7 hr 30 min."
@@ -1627,8 +1425,6 @@ c-wiz scroll-enabled:
                       bid="5dm,5dl": "LHR"
                 bid="5du":
                   bid="5ds,5dr": "Nonstop flight."
-                  hidden:
-                    bid="5dt"
                 bid="5e2,5e1":
                   bid="5dw,5dv": "376 kg CO2e"
                   bid="5e0":
@@ -1637,8 +1433,6 @@ c-wiz scroll-enabled:
                 bid="5e8":
                   bid="5e6":
                     bid="5e5,5e4" text label="765 US dollars": "$765"
-                    hidden:
-                      bid="5e3"
                   bid="5e7": "round trip"
             button bid="5ed": "Flight details. Leaves Newark Liberty International Airport at 6:45 PM on Friday, May 1 and arrives at Heathrow Airport at 7:15 AM on Saturday, May 2."
           bid="5ei":
@@ -1656,16 +1450,16 @@ c-wiz scroll-enabled:
           "Currency"
             "USD"
       div:
-        bid="5em" href="https://about.google/?hl=en-US": "About Google Travel"
-        bid="5en" href="https://policies.google.com/privacy?hl=en-US": "Privacy"
-        bid="5eo" href="https://policies.google.com/terms?hl=en-US": "Terms"
-        bid="5ep" href: "Join user studies"
+        a bid="5em": "About Google Travel"
+        a bid="5en": "Privacy"
+        a bid="5eo": "Terms"
+        a bid="5ep": "Join user studies"
         bid="5eq" button: "Report Illegal Content"
-        bid="5er" href="./#0": "Feedback"
-        bid="5es" href="https://support.google.com/travel/?hl=en-US#topic=2475360": "Help Center and Consumer Information"
+        a bid="5er": "Feedback"
+        a bid="5es": "Help Center and Consumer Information"
       div:
         p: "Displayed currencies may differ from the currencies used to purchase flights."
-          bid="5et" href="https://www.google.com/googlefinance/disclaimer?hl=en-US&gl=LU": "Learn more about currencies"
+          a bid="5et": "Learn more about currencies"
         p: "Prices are final prices and include all taxes and fees, including payment fees\n                          for the cheapest common payment method (which may differ depending on the provider).\n                          Additional charges may apply for other types of payment, luggage, meals, WLAN or other\n                          additional services. Prices, availability and travel details are provided based on the latest\n                          information received from our partners. This information is reflected in the results within a\n                          period of less than 24 hours. Additional conditions may also be applied by our partners. You\n                          should then check prices and conditions with the services providers before booking."
 "Main menu"
 "Google apps"

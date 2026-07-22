@@ -18,6 +18,21 @@ describe("provider options", () => {
 			include_usage: true,
 			reasoningSummary: "detailed",
 			reasoningEffort: "medium",
+			promptCacheRetention: "24h",
+		});
+	});
+
+	it("does not send legacy prompt cache retention to GPT-5.6", () => {
+		const options = __buildProviderOptionsForTests({
+			model: "gpt-5.6-terra",
+			provider: "openai",
+			reasoningEffort: "medium",
+		});
+
+		assert.deepEqual(options.openai, {
+			include_usage: true,
+			reasoningSummary: "detailed",
+			reasoningEffort: "medium",
 		});
 	});
 
