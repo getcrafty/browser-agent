@@ -442,6 +442,13 @@ export async function main(
         model: stageOptions.workflowPlanner.model,
         reasoningEffort: stageOptions.workflowPlanner.reasoningEffort,
       },
+      aggregatedResults: stageOptions.aggregatedResults
+        ? {
+            provider: stageOptions.aggregatedResults.provider,
+            model: stageOptions.aggregatedResults.model,
+            reasoningEffort: stageOptions.aggregatedResults.reasoningEffort,
+          }
+        : undefined,
       findTargetURL: {
         provider: stageOptions.findTargetURL.provider,
         model: stageOptions.findTargetURL.model,

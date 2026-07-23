@@ -156,6 +156,7 @@ describe("runTask retry loop", () => {
 				createTrace("runAgent"),
 				createTrace("dataExtraction"),
 				createTrace("createPlan", { phase: "replan" }),
+				createTrace("aggregatedResults"),
 				createTrace("verifySuccess"),
 				{
 					...createTrace("verifySuccess"),
@@ -202,6 +203,15 @@ describe("runTask retry loop", () => {
 				{
 					phase: "preprocess",
 					stage: "preExecutionDomPruning",
+					usage: {
+						input_tokens: 10,
+						output_tokens: 2,
+						total_tokens: 12,
+					},
+				},
+				{
+					phase: "verification",
+					stage: "aggregatedResults",
 					usage: {
 						input_tokens: 10,
 						output_tokens: 2,

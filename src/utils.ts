@@ -55,6 +55,7 @@ export interface StageLLMOverride {
 
 export interface StageLLMOverrides {
 	workflowPlanner?: StageLLMOverride;
+	aggregatedResults?: StageLLMOverride;
 	findTargetURL?: StageLLMOverride;
 	dismissCookieBanner?: StageLLMOverride;
 	createPlan?: StageLLMOverride;
@@ -67,6 +68,7 @@ export interface StageLLMOverrides {
 
 export interface StageLLMOptions {
 	workflowPlanner: LLMOptions;
+	aggregatedResults?: LLMOptions;
 	findTargetURL: LLMOptions;
 	dismissCookieBanner: LLMOptions;
 	createPlan: LLMOptions;
@@ -123,6 +125,7 @@ type StageLLMKey = keyof StageLLMOptions;
 
 const STAGE_KEYS: Record<StageLLMKey, string[]> = {
 	workflowPlanner: ["workflowPlanner", "workflow_planner"],
+	aggregatedResults: ["aggregatedResults", "aggregate_results"],
 	findTargetURL: ["findTargetURL", "find_target_url"],
 	dismissCookieBanner: ["dismissCookieBanner", "dismiss_cookie_banner"],
 	createPlan: ["createPlan", "create_plan"],
@@ -948,6 +951,12 @@ export function loadConfig(configPath: string): Config {
 		fullPath,
 		createPlanStageLLM,
 	);
+	const aggregatedResultsOverride = parseStageLLMOverride(
+		"aggregatedResults",
+		stageOverridesSource,
+		raw,
+		fullPath,
+	);
 	const stageLLMs: StageLLMOptions = {
 		workflowPlanner: resolveStageLLMOptions(
 			"workflowPlanner",
@@ -956,6 +965,16 @@ export function loadConfig(configPath: string): Config {
 			fullPath,
 			createPlanStageLLM,
 		),
+		...(aggregatedResultsOverride
+			? {
+					aggregatedResults: resolveStageLLMOptions(
+						"aggregatedResults",
+						stageOverridesSource,
+						raw,
+						fullPath,
+					),
+				}
+			: {}),
 		findTargetURL: resolveStageLLMOptions(
 			"findTargetURL",
 			stageOverridesSource,
@@ -1170,6 +1189,14 @@ export function loadConfig(configPath: string): Config {
 				"feature_flags.optimize_text_input",
 			) ?? false,
 	};
+	if (
+		configuredFeatureFlags.workflowOrchestration &&
+		!stageLLMs.aggregatedResults
+	) {
+		failConfig(
+			`Invalid config file: ${fullPath}. Workflow orchestration requires explicit stage_llms.aggregatedResults (or stage_llms.aggregate_results) settings.`,
+		);
+	}
 	const authCredentials = parseEncryptedAuthCredentialsConfig(
 		pickFirstDefined(raw, ["auth_credentials", "authCredentials"]),
 		fullPath,

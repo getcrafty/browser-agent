@@ -137,6 +137,10 @@ feature_flags:
 workflow_max_parallel_nodes: 4
 
 stage_llms:
+  aggregatedResults:
+    provider: openai
+    model: gpt-5.5
+    reasoning_effort: medium
   workflow_planner:
     provider: openai
     model: gpt-5.4
@@ -160,9 +164,10 @@ nodes can interpret each result. Scheduling and browser-tab handoffs continue
 to use direct edges.
 
 Workflows may have one or more terminal normal nodes; no dedicated final node
-is required. A single terminal result is returned directly. Multiple terminal
-results are returned as a structured list containing each node's task and
-result.
+is required. After all nodes succeed, the required explicit `aggregatedResults`
+stage selects the ordered node results that answer the original task. The
+runtime concatenates those exact result items and validates the aggregate once
+against the original task.
 
 ## Checklist and retry verifier
 

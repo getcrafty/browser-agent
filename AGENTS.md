@@ -28,6 +28,7 @@
 
 ## Verification and Dependencies
 
+- Run unit tests with multiple workers.
 - Run relevant DOM pipeline tests after simplified DOM changes.
 - For planner or executor contract changes, run focused unit tests and relevant e2e coverage.
 - When adding dependencies, SDKs, native modules, browser tooling, or runtime executables, update `package.json` and its lockfile in the same change.

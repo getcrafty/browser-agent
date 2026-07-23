@@ -70,6 +70,8 @@ export interface RunTaskStageLLMs extends PreprocessStageLLMs {
   runAgent: LLMOptions;
   dataExtraction: LLMOptions;
   verifySuccess?: LLMOptions;
+  /** Required at runtime when workflow orchestration is enabled. */
+  aggregatedResults?: LLMOptions;
 }
 
 export interface ValidatorLifecycleOptions {

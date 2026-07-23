@@ -35,6 +35,12 @@ describe("llm-env", () => {
 		delete process.env.VLLM_API_KEY;
 		const config: Config = {
 			stageLLMs: {
+				aggregatedResults: {
+					provider: "vllm",
+					model: "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4",
+					endpointUrl: "http://127.0.0.1:9002/v1",
+					reasoningEffort: "enabled",
+				},
 				findTargetURL: {
 					provider: "openai",
 					model: "gpt-5.4",
@@ -101,6 +107,12 @@ describe("llm-env", () => {
 				provider: "vllm",
 				model: "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4",
 				endpointUrl: "http://127.0.0.1:9001/v1",
+				reasoningEffort: "enabled",
+			});
+			assert.deepEqual(resolved.stageLLMs.aggregatedResults, {
+				provider: "vllm",
+				model: "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4",
+				endpointUrl: "http://127.0.0.1:9002/v1",
 				reasoningEffort: "enabled",
 			});
 		} finally {

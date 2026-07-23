@@ -4,6 +4,17 @@ import {
   planWorkflowExpansion,
 } from "../agents/workflow-planner.js";
 import {
+  materializeAggregatedResults,
+  selectAggregatedResults,
+  type AggregatedResultCandidate,
+} from "../agents/aggregated-results.js";
+import { verifyTaskSuccess as defaultVerifyTaskSuccess } from "../agents/success-verifier.js";
+import type {
+  StepResult,
+  SuccessVerificationResult,
+  TokenUsage,
+} from "../agents/types.js";
+import {
   TargetScopeCoordinator,
   TargetScopeViolationError,
   WorkflowScopeNotEmptyError,
@@ -37,6 +48,7 @@ import type {
   WorkflowNodeDiagnostic,
   WorkflowNodeExecutionPhase,
   WorkflowPlanningEvent,
+  WorkflowResult,
 } from "./workflow-types.js";
 import type { WorkflowPlanningOutcome } from "../agents/workflow-planner.js";
 
@@ -164,8 +176,11 @@ async function runNodePhase<T>(
   }
 }
 
-function sumTokenTotals(results: RunAgentResult[]): RunAgentTokenTotals {
-  return results.reduce<RunAgentTokenTotals>(
+function sumTokenTotals(
+  results: RunAgentResult[],
+  additionalUsages: TokenUsage[] = [],
+): RunAgentTokenTotals {
+  const totals = results.reduce<RunAgentTokenTotals>(
     (totals, result) => ({
       input_tokens: totals.input_tokens + result.tokenTotals.input_tokens,
       cached_input_tokens:
@@ -180,6 +195,120 @@ function sumTokenTotals(results: RunAgentResult[]): RunAgentTokenTotals {
       total_tokens: 0,
     },
   );
+  for (const usage of additionalUsages) {
+    totals.input_tokens += usage.input_tokens;
+    totals.cached_input_tokens += usage.cached_input_tokens ?? 0;
+    totals.output_tokens += usage.output_tokens;
+    totals.total_tokens += usage.total_tokens;
+  }
+  return totals;
+}
+
+export function buildAggregatedResultCandidates(
+  workflow: WorkflowResult,
+): AggregatedResultCandidate[] {
+  if (workflow.decision.mode !== "workflow") return [];
+  const resultByNodeId = new Map(
+    workflow.nodes.map((node) => [node.nodeId, node]),
+  );
+  return workflow.decision.nodes.map((node, position) => {
+    const nodeResult = resultByNodeId.get(node.id);
+    const result = nodeResult?.result;
+    return {
+      index: position + 1,
+      nodeId: node.id,
+      kind: node.kind,
+      task: node.task,
+      status: nodeResult?.status ?? "pending",
+      result,
+      selectable:
+        node.kind === "normal" &&
+        nodeResult?.status === "succeeded" &&
+        typeof result === "string" &&
+        result.trim().length > 0,
+    };
+  });
+}
+
+export interface FinalizeWorkflowAggregateInput {
+  task: string;
+  workflow: WorkflowResult;
+  executedSteps: number;
+  aggregatedResultsLLMOptions: NonNullable<
+    RunAgentInput["stageLLMs"]["aggregatedResults"]
+  >;
+  verifySuccessLLMOptions: NonNullable<
+    RunAgentInput["stageLLMs"]["verifySuccess"]
+  >;
+  abortSignal?: AbortSignal;
+  recordModelInvocation?: RunAgentInput["recordModelInvocation"];
+  select?: typeof selectAggregatedResults;
+  verify?: typeof defaultVerifyTaskSuccess;
+}
+
+export interface FinalizeWorkflowAggregateResult {
+  workflow: WorkflowResult;
+  result: string;
+  successVerification: SuccessVerificationResult;
+  usages: TokenUsage[];
+}
+
+export async function finalizeWorkflowAggregate(
+  input: FinalizeWorkflowAggregateInput,
+): Promise<FinalizeWorkflowAggregateResult> {
+  if (!input.workflow.successful || !input.workflow.completed) {
+    throw new Error("Cannot aggregate an incomplete workflow");
+  }
+  const candidates = buildAggregatedResultCandidates(input.workflow);
+  const selection = await (input.select ?? selectAggregatedResults)({
+    task: input.task,
+    candidates,
+    llmOptions: input.aggregatedResultsLLMOptions,
+    abortSignal: input.abortSignal,
+    onTrace: input.recordModelInvocation,
+  });
+  const aggregate = materializeAggregatedResults({
+    candidates,
+    selectedNodeIndices: selection.selectedNodeIndices,
+  });
+  const finalStep: StepResult = {
+    thinking: "",
+    previousStepPlanUpdate: [],
+    previousStepStatus: "progressed",
+    previousStepOutcome: "Completed all workflow nodes.",
+    currentStateObservation: "Selected workflow results were aggregated.",
+    nextActionRationale: "Validate the aggregate against the original task.",
+    actions: [{ type: "return_results" }],
+    done: true,
+    result: aggregate.result,
+  };
+  const successVerification = await (input.verify ?? defaultVerifyTaskSuccess)({
+    task: input.task,
+    executedSteps: input.executedSteps,
+    finalStep,
+    finalPromptPayload: {},
+    checklist: [],
+    purpose: "completion_verifier",
+    contextMode: "compact",
+    llmOptions: input.verifySuccessLLMOptions,
+    caller: "runAgentWithWorkflow:verifyAggregate",
+    onTrace: input.recordModelInvocation,
+    traceMeta: { phase: "workflow_aggregate_validation" },
+  });
+  return {
+    result: aggregate.result,
+    successVerification,
+    usages: [...selection.usages, successVerification.usage],
+    workflow: {
+      ...input.workflow,
+      selectedNodeIndices: selection.selectedNodeIndices,
+      selectedNodeIds: aggregate.selectedNodeIds,
+      result: aggregate.result,
+      completed: true,
+      successful: successVerification.success,
+      successVerification,
+    },
+  };
 }
 
 function flattenNodeResults(
@@ -560,20 +689,45 @@ export async function runAgentWithWorkflow(
     if (!initialNodeResult) {
       throw new Error("Workflow initial node did not produce a result.");
     }
-    const singleTerminalResult =
-      workflow.terminalNodeIds.length === 1
-        ? runResults.get(workflow.terminalNodeIds[0])
-        : undefined;
     const flattened = flattenNodeResults(resolvedNodes, runResults);
+    let finalizedWorkflow = workflow;
+    let finalizedResult = workflow.result;
+    let aggregateVerification: SuccessVerificationResult | undefined;
+    let aggregateUsages: TokenUsage[] = [];
+    if (workflow.successful && workflow.completed) {
+      if (!input.stageLLMs.aggregatedResults) {
+        throw new Error(
+          "Workflow orchestration requires stageLLMs.aggregatedResults",
+        );
+      }
+      if (!input.stageLLMs.verifySuccess) {
+        throw new Error(
+          "Workflow aggregate validation requires stageLLMs.verifySuccess",
+        );
+      }
+      const finalized = await finalizeWorkflowAggregate({
+        task: input.task,
+        workflow,
+        executedSteps: flattened.mainLoopEntries.length,
+        aggregatedResultsLLMOptions: input.stageLLMs.aggregatedResults,
+        verifySuccessLLMOptions: input.stageLLMs.verifySuccess,
+        abortSignal: input.abortSignal,
+        recordModelInvocation: input.recordModelInvocation,
+      });
+      finalizedWorkflow = finalized.workflow;
+      finalizedResult = finalized.result;
+      aggregateVerification = finalized.successVerification;
+      aggregateUsages = finalized.usages;
+    }
     return {
       preprocess: initialNodeResult.preprocess,
-      completed: workflow.completed,
-      successful: workflow.successful,
-      result: workflow.result,
+      completed: finalizedWorkflow.completed,
+      successful: finalizedWorkflow.successful,
+      result: finalizedResult,
       ...flattened,
-      tokenTotals: sumTokenTotals(orderedRunResults),
-      ...(singleTerminalResult?.successVerification
-        ? { successVerification: singleTerminalResult.successVerification }
+      tokenTotals: sumTokenTotals(orderedRunResults, aggregateUsages),
+      ...(aggregateVerification
+        ? { successVerification: aggregateVerification }
         : {}),
       ...(orderedRunResults.find((result) => result.userActionRequired)
         ?.userActionRequired
@@ -583,7 +737,7 @@ export async function runAgentWithWorkflow(
             )?.userActionRequired,
           }
         : {}),
-      workflow,
+      workflow: finalizedWorkflow,
     };
   } finally {
     if (rootSessionStarted) {

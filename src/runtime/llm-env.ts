@@ -49,6 +49,13 @@ export function resolveStageLLMsFromEnv(
 		workflowPlanner: resolveLLMOptionsFromEnv(
 			stageLLMs.workflowPlanner ?? stageLLMs.createPlan,
 		),
+		...(stageLLMs.aggregatedResults
+			? {
+					aggregatedResults: resolveLLMOptionsFromEnv(
+						stageLLMs.aggregatedResults,
+					),
+				}
+			: {}),
 		findTargetURL: resolveLLMOptionsFromEnv(stageLLMs.findTargetURL),
 		dismissCookieBanner: resolveLLMOptionsFromEnv(
 			stageLLMs.dismissCookieBanner,

@@ -122,12 +122,17 @@ export interface WorkflowResult {
   decision: WorkflowDecision;
   /** Runtime results, including replaced orchestrator control nodes. */
   nodes: WorkflowNodeResult[];
-  /** Leaf nodes whose results form the workflow output. */
+  /** Leaf nodes in the resolved DAG; retained as graph metadata. */
   terminalNodeIds: string[];
+  /** Ordered 1-based positions selected from the final resolved nodes list. */
+  selectedNodeIndices?: number[];
+  /** Node ids corresponding to selectedNodeIndices. */
+  selectedNodeIds?: string[];
   /** Present when the workflow has exactly one terminal node. */
   finalNodeId?: string;
   result: string | null;
   completed: boolean;
   successful: boolean;
+  successVerification?: import("../agents/types.js").SuccessVerificationResult;
   fallbackReason?: string;
 }

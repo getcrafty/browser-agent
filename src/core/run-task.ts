@@ -128,7 +128,10 @@ export function buildRecapStageUsage(
         stage: trace.stage,
         usage: trace.usage,
       });
-    } else if (trace.stage === "verifySuccess") {
+    } else if (
+      trace.stage === "verifySuccess" ||
+      trace.stage === "aggregatedResults"
+    ) {
       stageUsage.push({
         phase: "verification",
         stage: trace.stage,
@@ -242,7 +245,9 @@ export function sumTokenUsageInvocations(
 function getTokenUsageStagePhase(
   trace: StageModelInvocationTrace,
 ): TokenUsageArtifactInvocation["phase"] {
-  if (trace.stage === "verifySuccess") return "verification";
+  if (trace.stage === "verifySuccess" || trace.stage === "aggregatedResults") {
+    return "verification";
+  }
   if (
     PREPROCESS_RECAP_STAGES.has(trace.stage) ||
     (trace.stage === "createPlan" && trace.meta?.phase === "initial_plan")
