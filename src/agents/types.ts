@@ -169,7 +169,7 @@ export interface MainLoopStepEntry {
 	step: number;
 	messages: unknown[];
 	workflow_node_id?: string;
-	workflow_node_kind?: "preparation" | "task" | "synthesis";
+	workflow_node_kind?: "preparation" | "task" | "synthesis" | "orchestrator";
 	step_kind?:
 		"executor_step" | "auth_takeover_attempt" | "max_step_finalization";
 	auth_takeover_attempt?: AuthTakeoverAttemptEvent;

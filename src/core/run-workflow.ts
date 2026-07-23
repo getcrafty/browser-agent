@@ -1,5 +1,8 @@
 import * as path from "node:path";
-import { planWorkflow } from "../agents/workflow-planner.js";
+import {
+  planWorkflow,
+  planWorkflowExpansion,
+} from "../agents/workflow-planner.js";
 import {
   TargetScopeCoordinator,
   TargetScopeViolationError,
@@ -302,21 +305,22 @@ export async function runAgentWithWorkflow(
   let rootSessionStarted = false;
   const runResults = new Map<string, RunAgentResult>();
   const borrowedSessions = new Map<string, BrowserSession>();
-  const nodeIndex = new Map(
+  const nodeOrdinal = new Map(
     planning.decision.nodes.map((node, index) => [node.id, index]),
   );
-  const dependents = new Map(
-    planning.decision.nodes.map((node) => [node.id, [] as string[]]),
-  );
-  for (const node of planning.decision.nodes) {
-    for (const dependency of node.dependsOn) {
-      dependents.get(dependency)?.push(node.id);
-    }
-  }
+  let nextNodeOrdinal = planning.decision.nodes.length;
+  const ensureNodeOrdinal = (nodeId: string): number => {
+    const existing = nodeOrdinal.get(nodeId);
+    if (existing !== undefined) return existing;
+    const ordinal = nextNodeOrdinal;
+    nextNodeOrdinal += 1;
+    nodeOrdinal.set(nodeId, ordinal);
+    return ordinal;
+  };
   const nodeScopeId = (nodeId: string): string =>
-    `wf-n${nodeIndex.get(nodeId) ?? 0}`;
+    `wf-n${ensureNodeOrdinal(nodeId)}`;
   const edgeScopeId = (fromId: string, toId: string): string =>
-    `wf-e${nodeIndex.get(fromId) ?? 0}-${nodeIndex.get(toId) ?? 0}`;
+    `wf-e${ensureNodeOrdinal(fromId)}-${ensureNodeOrdinal(toId)}`;
 
   try {
     await input.onRunStarted?.({ task: input.task, session: input.session });
@@ -330,16 +334,67 @@ export async function runAgentWithWorkflow(
     ) as WorkflowNode;
     await coordinator.createPreparationScope(nodeScopeId(preparation.id));
     const defaults = getDefaultBrowserAgentArtifactDirectories();
+    const preparedExpansionRoots = new Set<string>();
 
     const workflow = await runWorkflowDAG({
       decision: planning.decision,
       maxParallelNodes: workflowMaxParallelNodes,
       abortSignal: input.abortSignal,
       onNodeEvent: (event) => console.log(formatWorkflowNodeEventLine(event)),
+      expandNode: async (node, context) => {
+        try {
+          const expansion = await planWorkflowExpansion({
+            task: buildWorkflowNodeTask(node, context.dependencies),
+            workflowNodeId: node.id,
+            llmOptions:
+              input.stageLLMs.workflowPlanner ?? input.stageLLMs.createPlan,
+            abortSignal: context.signal,
+            onTrace: input.recordModelInvocation,
+          });
+          return { reason: expansion.reason, nodes: expansion.nodes };
+        } catch (error) {
+          throwIfAborted(context.signal);
+          throw new WorkflowNodeExecutionError(
+            {
+              phase: "orchestration_expansion",
+              code: "planning_failed",
+            },
+            { cause: error },
+          );
+        }
+      },
+      prepareExpansion: async ({ signal, orchestrator, rootNodes }) => {
+        throwIfAborted(signal);
+        for (const node of rootNodes) ensureNodeOrdinal(node.id);
+        await runNodePhase("orchestration_expansion", async () => {
+          const controlScopeId = nodeScopeId(orchestrator.id);
+          const incomingScopes = orchestrator.dependsOn.map((dependency) =>
+            edgeScopeId(dependency, orchestrator.id),
+          );
+          if (incomingScopes.length === 1) {
+            coordinator.handoff(incomingScopes[0], controlScopeId);
+          } else {
+            coordinator.join(incomingScopes, controlScopeId);
+          }
+          if (rootNodes.length === 1) {
+            coordinator.handoff(controlScopeId, nodeScopeId(rootNodes[0].id));
+          } else {
+            await coordinator.fanOut(
+              controlScopeId,
+              rootNodes.map((node) => nodeScopeId(node.id)),
+            );
+            await coordinator.releaseScope(controlScopeId, {
+              closeTargets: true,
+            });
+          }
+          for (const node of rootNodes) preparedExpansionRoots.add(node.id);
+        });
+      },
       executeNode: async (node, context) => {
         throwIfAborted(context.signal);
         const scopeId = nodeScopeId(node.id);
-        if (node.kind !== "preparation") {
+        const expansionRootPrepared = preparedExpansionRoots.delete(node.id);
+        if (node.kind !== "preparation" && !expansionRootPrepared) {
           const incomingScopes = node.dependsOn.map((dependency) =>
             edgeScopeId(dependency, node.id),
           );
@@ -455,7 +510,7 @@ export async function runAgentWithWorkflow(
           );
         }
 
-        const successors = dependents.get(node.id) ?? [];
+        const successors = context.successors.map((successor) => successor.id);
         if (successors.length === 1) {
           const destinationScopeId = edgeScopeId(node.id, successors[0]);
           const sourceState = coordinator.diagnosticState(scopeId);
@@ -499,7 +554,11 @@ export async function runAgentWithWorkflow(
       },
     });
 
-    const orderedRunResults = planning.decision.nodes
+    if (workflow.decision.mode !== "workflow") {
+      throw new Error("Resolved workflow decision was not a workflow.");
+    }
+    const resolvedNodes = workflow.decision.nodes;
+    const orderedRunResults = resolvedNodes
       .map((node) => runResults.get(node.id))
       .filter((result): result is RunAgentResult => Boolean(result));
     const preparationResult = runResults.get(preparation.id);
@@ -510,7 +569,7 @@ export async function runAgentWithWorkflow(
       workflow.terminalNodeIds.length === 1
         ? runResults.get(workflow.terminalNodeIds[0])
         : undefined;
-    const flattened = flattenNodeResults(planning.decision.nodes, runResults);
+    const flattened = flattenNodeResults(resolvedNodes, runResults);
     return {
       preprocess: preparationResult.preprocess,
       completed: workflow.completed,

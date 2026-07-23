@@ -2,7 +2,9 @@ import { assert } from "chai";
 import { describe, it } from "mocha";
 import {
 	planWorkflow,
+	planWorkflowExpansion,
 	validateWorkflowDecision,
+	validateWorkflowExpansion,
 	WORKFLOW_PLANNER_SYSTEM,
 	WorkflowDecisionValidationError,
 } from "../src/agents/workflow-planner.js";
@@ -90,14 +92,153 @@ describe("workflow planner", () => {
 			WORKFLOW_PLANNER_SYSTEM,
 			"Only when the task requires authentication or shared origin setup",
 		);
+		assert.include(WORKFLOW_PLANNER_SYSTEM, "Example 3:");
 		assert.include(
 			WORKFLOW_PLANNER_SYSTEM,
-			"Example 3:",
+			"type: normal or type: orchestrator",
 		);
-		assert.include(
-			WORKFLOW_PLANNER_SYSTEM,
-			"every remaining node is a task node",
+		assert.include(WORKFLOW_PLANNER_SYSTEM, "Root nodes must be normal");
+		assert.include(WORKFLOW_PLANNER_SYSTEM, "maximum of 8 nodes");
+		assert.equal(WORKFLOW_PLANNER_SYSTEM.match(/\t- type: normal/g)?.length, 6);
+	});
+
+	it("accepts a deferred orchestrator after a normal two-node root", () => {
+		const normalized = validateWorkflowDecision({
+			mode: "workflow",
+			reason: "Fan out after discovery.",
+			nodes: [
+				{ task: "Discover records.", dependsOn: [] },
+				{
+					type: "orchestrator",
+					task: "Create one task per record.",
+					dependsOn: [1],
+				},
+			],
+		});
+		assert.equal(normalized.mode, "workflow");
+		if (normalized.mode === "workflow") {
+			assert.deepEqual(
+				normalized.nodes.map((node) => node.kind),
+				["preparation", "orchestrator"],
+			);
+		}
+		assert.throws(
+			() =>
+				validateWorkflowDecision({
+					mode: "workflow",
+					reason: "Invalid root.",
+					nodes: [
+						{ type: "orchestrator", task: "Root", dependsOn: [] },
+						{ task: "Child", dependsOn: [1] },
+					],
+				}),
+			/root nodes must be normal/i,
 		);
+	});
+
+	it("validates normal-only expansion DAGs with up to four nodes", () => {
+		const expansion = validateWorkflowExpansion({
+			mode: "workflow",
+			reason: "Two records.",
+			nodes: [
+				{ task: "Fetch A", dependsOn: [] },
+				{ type: "normal", task: "Fetch B", dependsOn: [] },
+			],
+		});
+		assert.deepEqual(
+			expansion.nodes.map((node) => ({
+				kind: node.kind,
+				dependsOn: node.dependsOn,
+			})),
+			[
+				{ kind: "task", dependsOn: [] },
+				{ kind: "task", dependsOn: [] },
+			],
+		);
+		assert.throws(
+			() =>
+				validateWorkflowExpansion({
+					mode: "workflow",
+					reason: "Nested.",
+					nodes: [{ type: "orchestrator", task: "Again", dependsOn: [] }],
+				}),
+			/must be normal/,
+		);
+		assert.throws(
+			() =>
+				validateWorkflowExpansion({
+					mode: "workflow",
+					reason: "Too many.",
+					nodes: Array.from({ length: 5 }, (_, index) => ({
+						task: `Task ${index}`,
+						dependsOn: [],
+					})),
+				}),
+			/1 to 4 nodes/,
+		);
+	});
+
+	it("retries deferred expansion three times before failing", async () => {
+		let attempts = 0;
+		const result = await planWorkflowExpansion({
+			task: "Expand from parent results",
+			workflowNodeId: "node_2",
+			llmOptions,
+			requestDecision: async () => {
+				attempts += 1;
+				if (attempts < 4) throw new Error("temporary failure");
+				return {
+					mode: "workflow",
+					reason: "Recovered.",
+					nodes: [{ task: "Fetch record", dependsOn: [] }],
+				};
+			},
+		});
+		assert.equal(attempts, 4);
+		assert.lengthOf(result.nodes, 1);
+
+		attempts = 0;
+		let thrown: unknown;
+		try {
+			await planWorkflowExpansion({
+				task: "Fail",
+				workflowNodeId: "node_2",
+				llmOptions,
+				requestDecision: async () => {
+					attempts += 1;
+					return { mode: "direct", reason: "Invalid expansion." };
+				},
+			});
+		} catch (error) {
+			thrown = error;
+		}
+		assert.equal(attempts, 4);
+		assert.equal((thrown as Error)?.name, "WorkflowExpansionPlanningError");
+	});
+
+	it("propagates deferred expansion cancellation without retrying", async () => {
+		const controller = new AbortController();
+		const abort = new Error("stop expansion");
+		abort.name = "AbortError";
+		controller.abort(abort);
+		let attempts = 0;
+		let thrown: unknown;
+		try {
+			await planWorkflowExpansion({
+				task: "Cancel",
+				workflowNodeId: "node_2",
+				llmOptions,
+				abortSignal: controller.signal,
+				requestDecision: async () => {
+					attempts += 1;
+					throw new Error("transport stopped");
+				},
+			});
+		} catch (error) {
+			thrown = error;
+		}
+		assert.equal(attempts, 0);
+		assert.strictEqual(thrown, abort);
 	});
 
 	it("normalizes valid direct and parallel workflow decisions", () => {
@@ -128,10 +269,7 @@ describe("workflow planner", () => {
 
 		const extraRoot = validWorkflow();
 		extraRoot.nodes[1].dependsOn = [];
-		assert.throws(
-			() => validateWorkflowDecision(extraRoot),
-			/only root/,
-		);
+		assert.throws(() => validateWorkflowDecision(extraRoot), /only root/);
 
 		const extraSink = validWorkflow();
 		extraSink.nodes[3].dependsOn = [2];

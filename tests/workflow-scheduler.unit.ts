@@ -1,8 +1,8 @@
 import { assert } from "chai";
 import { describe, it } from "mocha";
 import type {
-	WorkflowDecision,
-	WorkflowNodeDiagnostic,
+  WorkflowDecision,
+  WorkflowNodeDiagnostic,
 } from "../src/core/workflow-types.js";
 import {
   buildWorkflowParentResults,
@@ -107,6 +107,190 @@ describe("workflow scheduler", () => {
       { nodeId: "left", task: "Research left", result: "left-result" },
       { nodeId: "right", task: "Research right", result: "right-result" },
     ]);
+  });
+
+  it("waits for ancestors, grafts expanded nodes, and rewires downstream work", async () => {
+    const started: string[] = [];
+    const expandedWith: string[] = [];
+    const preparedRoots: string[] = [];
+    const result = await runWorkflowDAG({
+      decision: {
+        mode: "workflow",
+        reason: "Deferred fan-out",
+        nodes: [
+          {
+            id: "node_1",
+            kind: "preparation",
+            task: "Discover",
+            dependsOn: [],
+          },
+          {
+            id: "node_2",
+            kind: "orchestrator",
+            task: "Plan per record",
+            dependsOn: ["node_1"],
+          },
+          {
+            id: "node_3",
+            kind: "task",
+            task: "Use every detail",
+            dependsOn: ["node_2"],
+          },
+        ],
+      },
+      maxParallelNodes: 2,
+      expandNode: async (node, context) => {
+        assert.equal(node.id, "node_2");
+        expandedWith.push(
+          ...context.dependencies.map(
+            (dependency) => `${dependency.node.id}:${dependency.result}`,
+          ),
+        );
+        return {
+          reason: "Two records",
+          nodes: [
+            { id: "node_1", kind: "task", task: "Fetch A", dependsOn: [] },
+            { id: "node_2", kind: "task", task: "Fetch B", dependsOn: [] },
+          ],
+        };
+      },
+      prepareExpansion: async ({ rootNodes, leafNodes }) => {
+        preparedRoots.push(...rootNodes.map((node) => node.id));
+        assert.deepEqual(
+          leafNodes.map((node) => node.id),
+          ["node_2_1", "node_2_2"],
+        );
+      },
+      executeNode: async (node, context) => {
+        assert.notEqual(node.kind, "orchestrator");
+        started.push(node.id);
+        if (node.id === "node_3") {
+          assert.deepEqual(
+            context.dependencies.map((dependency) => dependency.node.id),
+            ["node_1", "node_2_1", "node_2_2"],
+          );
+        }
+        return { result: `${node.id}-result` };
+      },
+    });
+
+    assert.deepEqual(expandedWith, ["node_1:node_1-result"]);
+    assert.deepEqual(preparedRoots, ["node_2_1", "node_2_2"]);
+    assert.deepEqual(started, ["node_1", "node_2_1", "node_2_2", "node_3"]);
+    assert.equal(result.decision.mode, "workflow");
+    if (result.decision.mode === "workflow") {
+      assert.deepEqual(
+        result.decision.nodes.map((node) => ({
+          id: node.id,
+          dependsOn: node.dependsOn,
+        })),
+        [
+          { id: "node_1", dependsOn: [] },
+          { id: "node_2_1", dependsOn: ["node_1"] },
+          { id: "node_2_2", dependsOn: ["node_1"] },
+          { id: "node_3", dependsOn: ["node_2_1", "node_2_2"] },
+        ],
+      );
+    }
+    assert.deepEqual(result.terminalNodeIds, ["node_3"]);
+    assert.equal(result.result, "node_3-result");
+    assert.equal(result.initialDecision?.mode, "workflow");
+    assert.equal(
+      result.nodes.find((node) => node.nodeId === "node_2")?.status,
+      "succeeded",
+    );
+  });
+
+  it("expands multiple control nodes with all transitive ancestor results", async () => {
+    const contexts = new Map<string, string[]>();
+    const result = await runWorkflowDAG({
+      decision: {
+        mode: "workflow",
+        reason: "Two deferred branches",
+        nodes: [
+          {
+            id: "prepare",
+            kind: "preparation",
+            task: "Prepare",
+            dependsOn: [],
+          },
+          {
+            id: "discover",
+            kind: "task",
+            task: "Discover",
+            dependsOn: ["prepare"],
+          },
+          {
+            id: "left",
+            kind: "orchestrator",
+            task: "Left",
+            dependsOn: ["discover"],
+          },
+          {
+            id: "right",
+            kind: "orchestrator",
+            task: "Right",
+            dependsOn: ["discover"],
+          },
+        ],
+      },
+      maxParallelNodes: 2,
+      expandNode: async (node, context) => {
+        contexts.set(
+          node.id,
+          context.dependencies.map((dependency) => dependency.node.id),
+        );
+        return {
+          reason: node.id,
+          nodes: [
+            { id: "node_1", kind: "task", task: node.task, dependsOn: [] },
+          ],
+        };
+      },
+      executeNode: async (node) => ({ result: `${node.id}-result` }),
+    });
+
+    assert.deepEqual(contexts.get("left"), ["prepare", "discover"]);
+    assert.deepEqual(contexts.get("right"), ["prepare", "discover"]);
+    assert.deepEqual(result.terminalNodeIds, ["left_1", "right_1"]);
+    assert.isTrue(result.successful);
+  });
+
+  it("fails safely when deferred orchestration cannot expand", async () => {
+    const result = await runWorkflowDAG({
+      decision: {
+        mode: "workflow",
+        reason: "Deferred work",
+        nodes: [
+          { id: "node_1", kind: "preparation", task: "One", dependsOn: [] },
+          {
+            id: "node_2",
+            kind: "orchestrator",
+            task: "Expand",
+            dependsOn: ["node_1"],
+          },
+          { id: "node_3", kind: "task", task: "After", dependsOn: ["node_2"] },
+        ],
+      },
+      maxParallelNodes: 1,
+      expandNode: async () => {
+        throw new WorkflowNodeExecutionError({
+          phase: "orchestration_expansion",
+          code: "planning_failed",
+        });
+      },
+      executeNode: async (node) => ({ result: node.id }),
+    });
+
+    assert.deepEqual(
+      result.nodes.find((node) => node.nodeId === "node_2")?.diagnostic,
+      { phase: "orchestration_expansion", code: "planning_failed" },
+    );
+    assert.equal(
+      result.nodes.find((node) => node.nodeId === "node_3")?.status,
+      "skipped",
+    );
+    assert.isFalse(result.successful);
   });
 
   it("passes every transitive ancestor result without including sibling results", async () => {
@@ -222,7 +406,7 @@ describe("workflow scheduler", () => {
     assert.isFalse(result.successful);
   });
 
-	it("classifies unexpected failures without persisting their messages", async () => {
+  it("classifies unexpected failures without persisting their messages", async () => {
     const secret = "private page content and credential-shaped text";
     const result = await runWorkflowDAG({
       decision: {
@@ -240,36 +424,34 @@ describe("workflow scheduler", () => {
       phase: "agent_execution",
       code: "unexpected_error",
     });
-		assert.notInclude(JSON.stringify(result), secret);
-	});
+    assert.notInclude(JSON.stringify(result), secret);
+  });
 
-	it("drops non-allowlisted fields from typed diagnostics", async () => {
-		const secret = "raw exception detail";
-		const result = await runWorkflowDAG({
-			decision: {
-				mode: "workflow",
-				reason: "One node",
-				nodes: [
-					{ id: "only", kind: "task", task: "Fail", dependsOn: [] },
-				],
-			},
-			maxParallelNodes: 1,
-			executeNode: async () => {
-				throw new WorkflowNodeExecutionError({
-					phase: "successor_handoff",
-					code: "scope_missing",
-					destinationScopeId: `bad\n${secret}`,
-					rawMessage: secret,
-				} as WorkflowNodeDiagnostic & { rawMessage: string });
-			},
-		});
+  it("drops non-allowlisted fields from typed diagnostics", async () => {
+    const secret = "raw exception detail";
+    const result = await runWorkflowDAG({
+      decision: {
+        mode: "workflow",
+        reason: "One node",
+        nodes: [{ id: "only", kind: "task", task: "Fail", dependsOn: [] }],
+      },
+      maxParallelNodes: 1,
+      executeNode: async () => {
+        throw new WorkflowNodeExecutionError({
+          phase: "successor_handoff",
+          code: "scope_missing",
+          destinationScopeId: `bad\n${secret}`,
+          rawMessage: secret,
+        } as WorkflowNodeDiagnostic & { rawMessage: string });
+      },
+    });
 
-		assert.deepEqual(result.nodes[0]?.diagnostic, {
-			phase: "successor_handoff",
-			code: "scope_missing",
-		});
-		assert.notInclude(JSON.stringify(result), secret);
-	});
+    assert.deepEqual(result.nodes[0]?.diagnostic, {
+      phase: "successor_handoff",
+      code: "scope_missing",
+    });
+    assert.notInclude(JSON.stringify(result), secret);
+  });
 
   it("labels ancestor output as parent results and includes each parent task", () => {
     const parentResults = buildWorkflowParentResults([

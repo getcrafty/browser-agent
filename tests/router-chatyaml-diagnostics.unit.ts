@@ -3,9 +3,6 @@ import { afterEach, beforeEach, describe, it } from "mocha";
 import { chatYAML } from "../src/agents/providers/router.js";
 import { __setProviderOverrideForTests } from "../src/agents/providers/ai-sdk.js";
 
-const STALL_LOG_INTERVAL_MS_ENV =
-	"BROWSER_AGENT_CHAT_YAML_STALL_LOG_INTERVAL_MS";
-
 describe("router chatYAML diagnostics", () => {
 	const originalConsoleLog = console.log;
 	let logs: string[];
@@ -20,7 +17,6 @@ describe("router chatYAML diagnostics", () => {
 	afterEach(() => {
 		console.log = originalConsoleLog;
 		__setProviderOverrideForTests("openai", null);
-		delete process.env[STALL_LOG_INTERVAL_MS_ENV];
 	});
 
 	it("logs lifecycle milestones, records TTFT, and omits prompt and response content", async () => {
@@ -96,57 +92,6 @@ describe("router chatYAML diagnostics", () => {
 		assert.isFalse(logs.some((entry) => entry.includes("prompt-secret-value")));
 		assert.isFalse(
 			logs.some((entry) => entry.includes("response-secret-value")),
-		);
-	});
-
-	it("attributes slow-request heartbeats to the active provider phase", async () => {
-		process.env[STALL_LOG_INTERVAL_MS_ENV] = "10";
-		__setProviderOverrideForTests("openai", async (args) => {
-			await new Promise((resolve) => setTimeout(resolve, 15));
-			args.onLifecycleEvent?.({
-				type: "first_delta",
-				deltaType: "reasoning",
-			});
-			await new Promise((resolve) => setTimeout(resolve, 15));
-			args.onLifecycleEvent?.({ type: "first_text_delta" });
-			await new Promise((resolve) => setTimeout(resolve, 15));
-			args.onLifecycleEvent?.({
-				type: "text_stream_complete",
-				chunkCount: 1,
-				outputCharacters: 8,
-			});
-			await new Promise((resolve) => setTimeout(resolve, 15));
-			args.onLifecycleEvent?.({ type: "usage_complete" });
-			return {
-				content: "value: 1",
-				usage: {
-					input_tokens: 1,
-					output_tokens: 1,
-					total_tokens: 2,
-				},
-				reasoning_tokens: "",
-			};
-		});
-
-		await chatYAML<{ value: number }>(
-			[{ role: "user", content: "test" }],
-			{ provider: "openai", model: "gpt-test" },
-			"heartbeat-test",
-		);
-
-		const heartbeats = logs.filter((entry) =>
-			entry.includes("event=heartbeat"),
-		);
-		assert.isTrue(
-			heartbeats.some((entry) =>
-				entry.includes('phase="awaiting_first_token"'),
-			),
-		);
-		assert.isTrue(
-			heartbeats.some((entry) => entry.includes('phase="streaming"')),
-		);
-		assert.isTrue(
-			heartbeats.some((entry) => entry.includes('phase="awaiting_usage"')),
 		);
 	});
 

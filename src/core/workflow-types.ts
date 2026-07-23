@@ -1,4 +1,5 @@
-export type WorkflowNodeKind = "preparation" | "task" | "synthesis";
+export type WorkflowNodeKind =
+  "preparation" | "task" | "synthesis" | "orchestrator";
 
 export interface WorkflowNode {
   id: string;
@@ -28,7 +29,8 @@ export type WorkflowNodeExecutionPhase =
   | "dependency_handoff"
   | "successor_handoff"
   | "successor_fanout"
-  | "scope_release";
+  | "scope_release"
+  | "orchestration_expansion";
 
 export type WorkflowNodeFailureCode =
   | "node_incomplete"
@@ -37,6 +39,7 @@ export type WorkflowNodeFailureCode =
   | "scope_missing"
   | "scope_not_empty"
   | "scope_ownership_violation"
+  | "planning_failed"
   | "cancelled"
   | "unexpected_error";
 
@@ -114,7 +117,11 @@ export interface WorkflowNodeResult {
 }
 
 export interface WorkflowResult {
+  /** Original model decision when one or more orchestrator nodes expanded. */
+  initialDecision?: WorkflowDecision;
+  /** Final resolved DAG after successful orchestrator nodes were grafted. */
   decision: WorkflowDecision;
+  /** Runtime results, including replaced orchestrator control nodes. */
   nodes: WorkflowNodeResult[];
   /** Leaf nodes whose results form the workflow output. */
   terminalNodeIds: string[];

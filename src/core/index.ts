@@ -3,8 +3,14 @@ export * from "./workflow-types.js";
 export * from "./workflow-scheduler.js";
 export {
 	planWorkflow,
+	planWorkflowExpansion,
 	validateWorkflowDecision,
+	validateWorkflowExpansion,
 	WorkflowDecisionValidationError,
+	WorkflowExpansionPlanningError,
+	type PlanWorkflowExpansionInput,
+	type PlanWorkflowInput,
+	type WorkflowPlanningOutcome,
 } from "../agents/workflow-planner.js";
 export * from "./deps.js";
 export * from "./session.js";

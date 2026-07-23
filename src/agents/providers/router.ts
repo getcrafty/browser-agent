@@ -13,11 +13,8 @@ const MAX_RETRIES = 5;
 const BASE_RETRY_DELAY_MS = 500;
 const DEFAULT_OPENAI_TOKEN_COUNT_MODEL = "gpt-5.2";
 const DEFAULT_CHAT_YAML_HARD_TIMEOUT_MS = 300_000;
-const DEFAULT_CHAT_YAML_STALL_LOG_INTERVAL_MS = 5_000;
 
 const CHAT_YAML_HARD_TIMEOUT_MS_ENV = "BROWSER_AGENT_CHAT_YAML_HARD_TIMEOUT_MS";
-const CHAT_YAML_STALL_LOG_INTERVAL_MS_ENV =
-	"BROWSER_AGENT_CHAT_YAML_STALL_LOG_INTERVAL_MS";
 
 type ChatYAMLRequestPhase =
 	"awaiting_first_token" | "streaming" | "awaiting_usage" | "parsing";
@@ -104,13 +101,6 @@ function getChatYAMLHardTimeoutMs(): number {
 	return (
 		readPositiveIntEnv(CHAT_YAML_HARD_TIMEOUT_MS_ENV) ??
 		DEFAULT_CHAT_YAML_HARD_TIMEOUT_MS
-	);
-}
-
-function getChatYAMLStallLogIntervalMs(): number {
-	return (
-		readPositiveIntEnv(CHAT_YAML_STALL_LOG_INTERVAL_MS_ENV) ??
-		DEFAULT_CHAT_YAML_STALL_LOG_INTERVAL_MS
 	);
 }
 
@@ -514,7 +504,6 @@ export async function chatYAML<T>(
 				let reasoning_tokens = "";
 				const attemptStartedAt = Date.now();
 				const hardTimeoutMs = getChatYAMLHardTimeoutMs();
-				const stallLogIntervalMs = getChatYAMLStallLogIntervalMs();
 				let requestPhase: ChatYAMLRequestPhase = "awaiting_first_token";
 				let firstDeltaMs: number | undefined;
 				let firstTextDeltaMs: number | undefined;
@@ -531,30 +520,6 @@ export async function chatYAML<T>(
 					prompt_characters: completionPrompt.length,
 					hard_timeout_ms: hardTimeoutMs,
 				});
-
-				const heartbeatHandle: ReturnType<typeof setInterval> = setInterval(
-					() => {
-						logChatYAMLEvent("heartbeat", {
-							caller: resolvedCaller,
-							provider,
-							model,
-							attempt,
-							phase: requestPhase,
-							elapsed_ms: Date.now() - attemptStartedAt,
-							chunk_count: streamedChunkCount,
-							output_characters: streamedOutputCharacters,
-						});
-					},
-					stallLogIntervalMs,
-				);
-				if (
-					typeof heartbeatHandle === "object" &&
-					heartbeatHandle !== null &&
-					"unref" in heartbeatHandle &&
-					typeof heartbeatHandle.unref === "function"
-				) {
-					heartbeatHandle.unref();
-				}
 
 				const abortController = new AbortController();
 				let hardTimedOut = false;
@@ -710,7 +675,6 @@ export async function chatYAML<T>(
 					}
 					throw error;
 				} finally {
-					clearInterval(heartbeatHandle);
 					clearTimeout(hardTimeoutHandle);
 					abortSignal?.removeEventListener("abort", handleExternalAbort);
 					if (hardTimedOut) {

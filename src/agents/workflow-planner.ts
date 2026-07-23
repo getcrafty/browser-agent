@@ -10,9 +10,11 @@ import type {
 	WorkflowNode,
 } from "../core/workflow-types.js";
 
-const MIN_WORKFLOW_NODES = 3;
+const MIN_WORKFLOW_NODES = 2;
 const MAX_WORKFLOW_NODES = 8;
 const WORKFLOW_SCHEMA_MAX_ATTEMPTS = 3;
+const MAX_WORKFLOW_EXPANSION_NODES = 4;
+const WORKFLOW_EXPANSION_MAX_ATTEMPTS = 4;
 
 export const WORKFLOW_PLANNER_SYSTEM = `
 You decide whether a browser task should run as one browser agent or as a directed acyclic graph (DAG) of browser agents.
@@ -27,30 +29,38 @@ Example 2:
 	mode: workflow
 	reason: Brief reason orchestration is useful.
 	nodes:
-	- task: Prepare the shared browser context and resources needed by downstream nodes.
+	- type: normal
+		task: Prepare the shared browser context and resources needed by downstream nodes.
 		dependsOn: []
-	- task: A bounded browser subtask with a concrete result.
+	- type: normal
+		task: A bounded browser subtask with a concrete result.
 		dependsOn: [1]
-	- task: A follow-up bounded subtask that uses relevant parent results.
+	- type: normal
+		task: A follow-up bounded subtask that uses relevant parent results.
 		dependsOn: [2]
 
 Example 3:
 	mode: workflow
 	reason: Brief reason parallel execution is useful.
 	nodes:
-	- task: Prepare the shared browser context and resources needed by downstream nodes.
+	- type: normal
+		task: Prepare the shared browser context and resources needed by downstream nodes.
 		dependsOn: []
-	- task: Complete one independent bounded subtask and return a concrete result.
+	- type: normal
+		task: Complete one independent bounded subtask and return a concrete result.
 		dependsOn: [1]
-	- task: Complete another independent bounded subtask and return a concrete result.
+	- type: normal
+		task: Complete another independent bounded subtask and return a concrete result.
 		dependsOn: [1]
 
 - Choose direct for simple tasks, including tasks that are naturally handled in one short browser trajectory. 
 - Choose workflow only when the task has meaningful independent work, useful parallelism, or multiple ordered substeps that justify orchestration overhead.
-- A workflow should contain a maximum of 10 nodes 
+- A workflow should contain a maximum of 8 nodes
+- Each node may use type: normal or type: orchestrator. Omitted type defaults to normal.
+- Root nodes must be normal. An orchestrator node waits for its dependencies, then recalls orchestration using their completed results instead of doing browser work.
 - If using workflow mode, do not attempt to solve any parts of the task when rewording the task into subtasks. For example, you should not include any part of answers in node task, unless it is present in the original task.
 - Dependencies must refer only to earlier nodes. 
-- The nodes are browser agents only, so each task should be a task well suited for a browser agent
+- Normal nodes are browser agents, so each normal task should be well suited for a browser agent
 - Dont include verification steps or post processing steps
 - Only when the task requires authentication or shared origin setup, handle it in the first node whenever possible, before any branch runs so subsequent nodes inherit that browser state.`;
 
@@ -78,6 +88,17 @@ export interface PlanWorkflowInput {
 		llmOptions: LLMOptions;
 		abortSignal?: AbortSignal;
 	}) => Promise<unknown>;
+}
+
+export interface PlanWorkflowExpansionInput extends PlanWorkflowInput {
+	workflowNodeId: string;
+}
+
+export class WorkflowExpansionPlanningError extends Error {
+	constructor() {
+		super("Workflow orchestration expansion failed.");
+		this.name = "WorkflowExpansionPlanningError";
+	}
 }
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
@@ -142,6 +163,7 @@ function parseWorkflowNode(
 	value: unknown,
 	index: number,
 	nodeCount: number,
+	mode: "initial" | "expansion",
 ): WorkflowNode {
 	const source = asObject(value, `Workflow node ${index + 1}`);
 	if ("id" in source || "kind" in source) {
@@ -149,10 +171,31 @@ function parseWorkflowNode(
 			`Workflow node ${index + 1} must not include id or kind.`,
 		);
 	}
+	const type = source.type ?? "normal";
+	if (type !== "normal" && type !== "orchestrator") {
+		throw new WorkflowDecisionValidationError(
+			`Workflow node ${index + 1} type must be normal or orchestrator.`,
+		);
+	}
+	if (mode === "expansion" && type === "orchestrator") {
+		throw new WorkflowDecisionValidationError(
+			"Expanded workflow nodes must be normal.",
+		);
+	}
+	if (mode === "initial" && index === 0 && type === "orchestrator") {
+		throw new WorkflowDecisionValidationError(
+			"Workflow root nodes must be normal.",
+		);
+	}
 	const id = workflowNodeId(index);
 	return {
 		id,
-		kind: index === 0 ? "preparation" : "task",
+		kind:
+			mode === "initial" && index === 0
+				? "preparation"
+				: type === "orchestrator"
+					? "orchestrator"
+					: "task",
 		task: asNonEmptyString(source.task, `Workflow node '${id}' task`),
 		dependsOn: parseDependsOn(
 			source.dependsOn ?? source.depends_on,
@@ -206,14 +249,17 @@ function collectReachable(
 	return visited;
 }
 
-export function validateWorkflowDecision(value: unknown): WorkflowDecision {
+function validateWorkflowShape(
+	value: unknown,
+	validationMode: "initial" | "expansion",
+): WorkflowDecision {
 	const source = asObject(value, "Workflow decision");
-	const mode = asNonEmptyString(source.mode, "Workflow decision mode");
+	const decisionMode = asNonEmptyString(source.mode, "Workflow decision mode");
 	const reason = asNonEmptyString(source.reason, "Workflow decision reason");
-	if (mode === "direct") return { mode, reason };
-	if (mode !== "workflow") {
+	if (decisionMode === "direct") return { mode: decisionMode, reason };
+	if (decisionMode !== "workflow") {
 		throw new WorkflowDecisionValidationError(
-			`Unsupported workflow decision mode '${mode}'.`,
+			`Unsupported workflow decision mode '${decisionMode}'.`,
 		);
 	}
 	if (!Array.isArray(source.nodes)) {
@@ -222,17 +268,19 @@ export function validateWorkflowDecision(value: unknown): WorkflowDecision {
 		);
 	}
 	const nodeSources = source.nodes;
-	if (
-		nodeSources.length < MIN_WORKFLOW_NODES ||
-		nodeSources.length > MAX_WORKFLOW_NODES
-	) {
+	const minimumNodes = validationMode === "initial" ? MIN_WORKFLOW_NODES : 1;
+	const maximumNodes =
+		validationMode === "initial"
+			? MAX_WORKFLOW_NODES
+			: MAX_WORKFLOW_EXPANSION_NODES;
+	if (nodeSources.length < minimumNodes || nodeSources.length > maximumNodes) {
 		throw new WorkflowDecisionValidationError(
-			`Workflow must contain ${MIN_WORKFLOW_NODES} to ${MAX_WORKFLOW_NODES} nodes.`,
+			`Workflow must contain ${minimumNodes} to ${maximumNodes} nodes.`,
 		);
 	}
 
 	const nodes = nodeSources.map((node, index) =>
-		parseWorkflowNode(node, index, nodeSources.length),
+		parseWorkflowNode(node, index, nodeSources.length, validationMode),
 	);
 	const nodeById = new Map<string, WorkflowNode>();
 	for (const node of nodes) {
@@ -259,13 +307,22 @@ export function validateWorkflowDecision(value: unknown): WorkflowDecision {
 	}
 	assertAcyclic(nodes);
 
+	const roots = nodes.filter((node) => node.dependsOn.length === 0);
+	if (roots.some((node) => node.kind === "orchestrator")) {
+		throw new WorkflowDecisionValidationError(
+			"Workflow root nodes must be normal.",
+		);
+	}
+	if (validationMode === "expansion") {
+		return { mode: "workflow", reason, nodes };
+	}
+
 	const preparations = nodes.filter((node) => node.kind === "preparation");
 	if (preparations.length !== 1 || preparations[0].dependsOn.length !== 0) {
 		throw new WorkflowDecisionValidationError(
 			"Workflow must have exactly one preparation root.",
 		);
 	}
-	const roots = nodes.filter((node) => node.dependsOn.length === 0);
 	if (roots.length !== 1 || roots[0].id !== preparations[0].id) {
 		throw new WorkflowDecisionValidationError(
 			"Workflow preparation must be the only root.",
@@ -279,7 +336,23 @@ export function validateWorkflowDecision(value: unknown): WorkflowDecision {
 			"Every workflow node must descend from preparation.",
 		);
 	}
-	return { mode, reason, nodes };
+	return { mode: "workflow", reason, nodes };
+}
+
+export function validateWorkflowDecision(value: unknown): WorkflowDecision {
+	return validateWorkflowShape(value, "initial");
+}
+
+export function validateWorkflowExpansion(
+	value: unknown,
+): Extract<WorkflowDecision, { mode: "workflow" }> {
+	const decision = validateWorkflowShape(value, "expansion");
+	if (decision.mode !== "workflow") {
+		throw new WorkflowDecisionValidationError(
+			"Workflow expansion must use workflow mode.",
+		);
+	}
+	return decision;
 }
 
 function isAbort(error: unknown, signal?: AbortSignal): boolean {
@@ -287,6 +360,14 @@ function isAbort(error: unknown, signal?: AbortSignal): boolean {
 		signal?.aborted === true ||
 		(error instanceof Error && error.name === "AbortError")
 	);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+	if (!signal?.aborted) return;
+	if (signal.reason instanceof Error) throw signal.reason;
+	const error = new Error("Workflow planning was aborted.");
+	error.name = "AbortError";
+	throw error;
 }
 
 export async function planWorkflow(
@@ -354,4 +435,61 @@ export async function planWorkflow(
 			fallbackReason,
 		};
 	}
+}
+
+export async function planWorkflowExpansion(
+	input: PlanWorkflowExpansionInput,
+): Promise<Extract<WorkflowDecision, { mode: "workflow" }>> {
+	const messages: Message[] = [
+		{ role: "system", content: WORKFLOW_PLANNER_SYSTEM },
+		{
+			role: "user",
+			content: `Task: ${input.task}\n\nThis is a deferred workflow expansion. Return workflow mode with 1 to ${MAX_WORKFLOW_EXPANSION_NODES} normal nodes. Multiple root nodes are allowed.`,
+		},
+	];
+	for (
+		let expansionAttempt = 1;
+		expansionAttempt <= WORKFLOW_EXPANSION_MAX_ATTEMPTS;
+		expansionAttempt += 1
+	) {
+		try {
+			throwIfAborted(input.abortSignal);
+			const data = input.requestDecision
+				? await input.requestDecision({
+						messages,
+						llmOptions: input.llmOptions,
+						abortSignal: input.abortSignal,
+					})
+				: (
+						await chatYAML<unknown>(
+							messages,
+							input.llmOptions,
+							"workflowPlanner",
+							(trace) =>
+								input.onTrace?.(
+									buildStageModelInvocationTrace({
+										stage: "workflowPlanner",
+										trace,
+										meta: {
+											phase: "workflow_expansion",
+											workflowNodeId: input.workflowNodeId,
+											workflowNodeKind: "orchestrator",
+											expansionAttempt,
+											...(input.traceMeta ?? {}),
+										},
+									}),
+								),
+							input.abortSignal,
+						)
+					).data;
+			throwIfAborted(input.abortSignal);
+			return validateWorkflowExpansion(data);
+		} catch (error) {
+			if (isAbort(error, input.abortSignal)) throw error;
+			if (expansionAttempt === WORKFLOW_EXPANSION_MAX_ATTEMPTS) {
+				throw new WorkflowExpansionPlanningError();
+			}
+		}
+	}
+	throw new WorkflowExpansionPlanningError();
 }
