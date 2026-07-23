@@ -185,6 +185,7 @@ tasks:
 			endpointUrl: undefined,
 		});
 		assert.deepEqual(config.featureFlags, {
+			workflowOrchestration: false,
 			preStepScreenshotInLatestUserPrompt: false,
 			userTakeoverTool: true,
 			authTakeover: false,
@@ -249,6 +250,7 @@ tasks:
 			endpointUrl: undefined,
 		});
 		assert.deepEqual(config.featureFlags, {
+			workflowOrchestration: false,
 			preStepScreenshotInLatestUserPrompt: false,
 			userTakeoverTool: true,
 			authTakeover: false,
@@ -699,6 +701,7 @@ tasks:
 			const config = loadConfig(configPath);
 
 			assert.deepEqual(config.featureFlags, {
+				workflowOrchestration: false,
 				preStepScreenshotInLatestUserPrompt: true,
 				userTakeoverTool: false,
 				authTakeover: true,
@@ -710,6 +713,7 @@ tasks:
 				optimizeTextInput: true,
 			});
 			assert.deepEqual(configFeatureFlags, {
+				workflowOrchestration: false,
 				preStepScreenshotInLatestUserPrompt: originalPreStepScreenshot,
 				userTakeoverTool: originalUserTakeover,
 				authTakeover: originalAuthTakeover,
@@ -1610,6 +1614,7 @@ tasks:
 		try {
 			const deps = createDefaultCoreDeps({
 				featureFlags: {
+					workflowOrchestration: false,
 					preStepScreenshotInLatestUserPrompt: true,
 					userTakeoverTool: false,
 					authTakeover: true,
@@ -1623,6 +1628,7 @@ tasks:
 			});
 
 			assert.deepEqual(deps.featureFlags, {
+				workflowOrchestration: false,
 				preStepScreenshotInLatestUserPrompt: true,
 				userTakeoverTool: false,
 				authTakeover: true,

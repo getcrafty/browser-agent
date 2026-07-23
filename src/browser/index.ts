@@ -1,6 +1,18 @@
 // Re-export types
 export type { Browser, Tab } from "./types.js";
 export type { BrowserRemoteInput, BrowserViewportMetrics } from "./types.js";
+export type { BrowserTargetScope } from "./types.js";
+export {
+	TargetScopeCoordinator,
+	TargetScopeViolationError,
+	WorkflowScopeNotEmptyError,
+	WorkflowScopeNotFoundError,
+} from "./target-scope.js";
+export type {
+	ScopedTargetInfo,
+	TargetScopeBackend,
+	WorkflowScopeDiagnosticState,
+} from "./target-scope.js";
 
 // Re-export browser functions
 export {

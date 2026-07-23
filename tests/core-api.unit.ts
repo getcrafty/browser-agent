@@ -364,6 +364,7 @@ describe("core-api", () => {
 			assert.strictEqual(result.mode, "create_prompt_for_step");
 			assert.deepEqual(domOptions, {
 				includeNonClickableIds: true,
+				omitHrefs: true,
 				redactInputBids: ["u1", "p1"],
 				redactPasswordInputs: true,
 			});

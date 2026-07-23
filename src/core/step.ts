@@ -32,7 +32,10 @@ import type { BrowserSession } from "./session-registry.js";
 import type { Tab } from "../browser/types.js";
 import { processModelStepOutput } from "./process-model-step-output.js";
 import { Action } from "../agents/types.js";
-import { attemptAutomatedAuthTakeover } from "../auth/runtime.js";
+import {
+	attemptAutomatedAuthTakeover,
+	LateWorkflowAuthenticationError,
+} from "../auth/runtime.js";
 import { verifyTaskSuccess as defaultVerifyTaskSuccess } from "../agents/success-verifier.js";
 import {
 	applyPlanStepUpdates,
@@ -120,6 +123,9 @@ async function getAuthUsernameForContext(params: {
 	session: BrowserSession;
 	currentUrl: string;
 }): Promise<string | undefined> {
+	if (params.session.workflowAuthenticationPolicy === "reject") {
+		return undefined;
+	}
 	const sessionAuth = params.session.authTakeover;
 	if (
 		!sessionAuth?.enabled ||
@@ -1071,8 +1077,13 @@ export async function browse(
 					sessionAuth: session.authTakeover,
 					stepBaseIndex: authInput.stepBaseIndex,
 				}),
+			authenticationPolicy: session.workflowAuthenticationPolicy,
+			abortSignal: input.abortSignal,
 		});
 	} catch (error) {
+		if (error instanceof LateWorkflowAuthenticationError) {
+			throw error;
+		}
 		if (input.allowFatalActionErrors) {
 			throw error;
 		}
@@ -1094,6 +1105,11 @@ export async function browse(
 
 	session.pendingMemoryRead =
 		session.pendingMemoryRead || execution.pendingMemoryRead;
+	if (execution.authenticationOutcome === "unhandled") {
+		session.workflowAuthenticationUnresolved = true;
+	} else if (execution.authenticationOutcome === "handled") {
+		session.workflowAuthenticationUnresolved = false;
+	}
 	session.previousToolObservations = execution.toolObservations ?? [];
 	if (execution.websiteToolOutcome) {
 		session.activeWebsiteToolGuidance =
@@ -1393,6 +1409,7 @@ export async function processModelOutputAndBrowse(
 		stepNumber: input.stepNumber,
 		allowFatalActionErrors: input.allowFatalActionErrors,
 		autoSwitchToNewTab: input.autoSwitchToNewTab,
+		abortSignal: input.abortSignal,
 		promptDownloadedFiles: Array.isArray(
 			input.promptPayload.downloadedFiles,
 		)

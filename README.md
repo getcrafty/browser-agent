@@ -124,6 +124,46 @@ See the [Python SDK documentation](./sdk/python-sdk/README.md).
 
 Tasks may include website credentials. They are sent only through the local child-process stream, encrypted immediately, and excluded from configuration files, logs, and errors.
 
+## Workflow orchestration
+
+Complex tasks can be decomposed into a bounded DAG of browser agents that
+share one Chrome session while concurrent branches see only their own tabs.
+The feature is disabled by default:
+
+```yaml
+feature_flags:
+  workflow_orchestration: true
+
+workflow_max_parallel_nodes: 4
+
+stage_llms:
+  workflow_planner:
+    provider: openai
+    model: gpt-5.4
+    reasoning_effort: medium
+```
+
+The workflow planner defaults to the configured `create_plan` model when no
+dedicated override is supplied. When authentication preparation is required,
+it runs before parallel branches; `max_steps` applies independently to each
+DAG node.
+
+For each workflow attempt, one self-contained validated DAG file is written
+directly under `orchestration_logs` next to the configured
+`step_messages_jsonl_path`. Files are named
+`dag-task-XXX-attempt-YYY.json`; node prompts remain available in each node's
+`task` field. The attempt index is unique across task runs and retries.
+
+Each workflow node receives the successful result of every transitive ancestor
+in the DAG. These parent results include the ancestor's task so downstream
+nodes can interpret each result. Scheduling and browser-tab handoffs continue
+to use direct edges.
+
+Workflows may have one or more terminal task nodes; no synthesis node is
+required. A single terminal result is returned directly. Multiple terminal
+results are returned as a structured list containing each node's task and
+result.
+
 ## License
 
 Licensed under the [MIT License](./LICENSE.md).

@@ -501,7 +501,6 @@ async function runProviderChatInternal(args: ProviderChatArgs): Promise<{
 		});
 		const chunks: string[] = [];
 		for await (const chunk of streamed.textStream) {
-			console.log(chunk)
 			chunks.push(chunk);
 			args.onOutputChunk?.(chunk);
 		}

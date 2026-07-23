@@ -217,6 +217,8 @@ export async function waitForAllOpenTabsToSettle(
 	);
 
 	if (timeoutMs === 0) return;
+	await b.targetScope?.refresh();
+	const ownedTargetIds = b.targetScope?.listTargetIds();
 
 	let targetInfos:
 		| Array<{
@@ -241,7 +243,10 @@ export async function waitForAllOpenTabsToSettle(
 
 	const pageTargetIds = (targetInfos || [])
 		.filter(
-			(target) => target.type === "page" && typeof target.id === "string",
+			(target) =>
+				target.type === "page" &&
+				typeof target.id === "string" &&
+				(!ownedTargetIds || ownedTargetIds.has(target.id)),
 		)
 		.map((target) => target.id as string);
 

@@ -57,6 +57,7 @@ describe("auth prompt protection", () => {
 			assert.deepEqual(domOptions, [
 				{
 					includeNonClickableIds: true,
+					omitHrefs: true,
 					redactInputBids: ["u1", "p1"],
 					redactPasswordInputs: true,
 				},

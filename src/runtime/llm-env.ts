@@ -21,6 +21,13 @@ export function resolvePreprocessStageLLMsFromEnv(
 	stageLLMs: PreprocessStageLLMs,
 ): PreprocessStageLLMs {
 	return {
+		...(stageLLMs.workflowPlanner
+			? {
+					workflowPlanner: resolveLLMOptionsFromEnv(
+						stageLLMs.workflowPlanner,
+					),
+				}
+			: {}),
 		findTargetURL: resolveLLMOptionsFromEnv(stageLLMs.findTargetURL),
 		dismissCookieBanner: resolveLLMOptionsFromEnv(
 			stageLLMs.dismissCookieBanner,
@@ -36,6 +43,9 @@ export function resolveStageLLMsFromEnv(
 	stageLLMs: StageLLMOptions,
 ): StageLLMOptions {
 	return {
+		workflowPlanner: resolveLLMOptionsFromEnv(
+			stageLLMs.workflowPlanner ?? stageLLMs.createPlan,
+		),
 		findTargetURL: resolveLLMOptionsFromEnv(stageLLMs.findTargetURL),
 		dismissCookieBanner: resolveLLMOptionsFromEnv(
 			stageLLMs.dismissCookieBanner,

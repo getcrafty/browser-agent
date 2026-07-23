@@ -23,6 +23,15 @@ import type {
 	AuthTakeoverSelectedBidsPresence,
 	SessionAuthTakeoverState,
 } from "./types.js";
+
+export class LateWorkflowAuthenticationError extends Error {
+	constructor() {
+		super(
+			"Authentication was requested after the workflow preparation barrier.",
+		);
+		this.name = "LateWorkflowAuthenticationError";
+	}
+}
 import type { TokenUsage } from "../agents/types.js";
 import { featureFlags } from "../featureFlags.js";
 

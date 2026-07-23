@@ -54,6 +54,7 @@ export interface StageLLMOverride {
 }
 
 export interface StageLLMOverrides {
+	workflowPlanner?: StageLLMOverride;
 	findTargetURL?: StageLLMOverride;
 	dismissCookieBanner?: StageLLMOverride;
 	createPlan?: StageLLMOverride;
@@ -64,6 +65,7 @@ export interface StageLLMOverrides {
 }
 
 export interface StageLLMOptions {
+	workflowPlanner: LLMOptions;
 	findTargetURL: LLMOptions;
 	dismissCookieBanner: LLMOptions;
 	createPlan: LLMOptions;
@@ -76,6 +78,7 @@ export interface StageLLMOptions {
 export interface Config {
 	stageLLMs: StageLLMOptions;
 	featureFlags: ConfigFeatureFlags;
+	workflowMaxParallelNodes: number;
 	authCredentials?: AuthCredentialsInput;
 	browserProfiles?: BrowserProfilesConfig;
 	headless: boolean;
@@ -117,6 +120,7 @@ function configDir(): string {
 type StageLLMKey = keyof StageLLMOptions;
 
 const STAGE_KEYS: Record<StageLLMKey, string[]> = {
+	workflowPlanner: ["workflowPlanner", "workflow_planner"],
 	findTargetURL: ["findTargetURL", "find_target_url"],
 	dismissCookieBanner: ["dismissCookieBanner", "dismiss_cookie_banner"],
 	createPlan: ["createPlan", "create_plan"],
@@ -935,6 +939,13 @@ export function loadConfig(configPath: string): Config {
 		defaultLLM,
 	);
 	const stageLLMs: StageLLMOptions = {
+		workflowPlanner: resolveStageLLMOptions(
+			"workflowPlanner",
+			stageOverridesSource,
+			raw,
+			fullPath,
+			createPlanStageLLM,
+		),
 		findTargetURL: resolveStageLLMOptions(
 			"findTargetURL",
 			stageOverridesSource,
@@ -1039,6 +1050,15 @@ export function loadConfig(configPath: string): Config {
 		}
 	}
 	const configuredFeatureFlags: ConfigFeatureFlags = {
+		workflowOrchestration:
+			parseBooleanConfigValue(
+				pickFirstDefined(featureFlagsSource, [
+					"workflow_orchestration",
+					"workflowOrchestration",
+				]),
+				fullPath,
+				"feature_flags.workflow_orchestration",
+			) ?? false,
 		preStepScreenshotInLatestUserPrompt:
 			parseBooleanConfigValue(
 				pickFirstDefined(featureFlagsSource, [
@@ -1240,6 +1260,21 @@ export function loadConfig(configPath: string): Config {
 			`Invalid max_steps value in config: ${fullPath}. Use an integer >= 1.`,
 		);
 	}
+	const workflowMaxParallelNodesInput = pickFirstDefined(raw, [
+		"workflow_max_parallel_nodes",
+		"workflowMaxParallelNodes",
+	]);
+	if (
+		workflowMaxParallelNodesInput !== undefined &&
+		(typeof workflowMaxParallelNodesInput !== "number" ||
+			!Number.isInteger(workflowMaxParallelNodesInput) ||
+			workflowMaxParallelNodesInput < 1 ||
+			workflowMaxParallelNodesInput > 8)
+	) {
+		failConfig(
+			`Invalid workflow_max_parallel_nodes value in config: ${fullPath}. Use an integer from 1 to 8.`,
+		);
+	}
 	const validatorLifecycleInput = pickFirstDefined(raw, [
 		"validator_lifecycle",
 		"validatorLifecycle",
@@ -1432,6 +1467,8 @@ export function loadConfig(configPath: string): Config {
 	return {
 		stageLLMs,
 		featureFlags: configuredFeatureFlags,
+		workflowMaxParallelNodes:
+			(workflowMaxParallelNodesInput as number | undefined) ?? 4,
 		authCredentials,
 		browserProfiles,
 		headless: (headlessInput as boolean | undefined) ?? false,

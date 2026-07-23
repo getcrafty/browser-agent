@@ -7,6 +7,16 @@ export interface Tab {
 	title: string;
 }
 
+/** Restricts a Browser facade to the targets owned by one workflow node. */
+export interface BrowserTargetScope {
+	readonly scopeId: string;
+	refresh(): Promise<void>;
+	listTargetIds(): ReadonlySet<string>;
+	assertOwned(targetId: string): void;
+	claimCreatedTarget(targetId: string): Promise<void>;
+	releaseTarget(targetId: string): void;
+}
+
 export interface Browser {
 	client: CDP.Client;
 	chrome: chromeLauncher.LaunchedChrome;
@@ -25,6 +35,7 @@ export interface Browser {
 	userDataDir?: string;
 	closeTransport?: () => Promise<void>;
 	onActivateTarget?: (targetId: string) => Promise<void>;
+	targetScope?: BrowserTargetScope;
 }
 
 export interface BrowserViewportMetrics {

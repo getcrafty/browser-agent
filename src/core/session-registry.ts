@@ -16,6 +16,7 @@ import type {
 	WebsiteToolActiveGuidance,
 	WebsiteToolResultContext,
 } from "../website-tools.js";
+import type { WorkflowAuthenticationPolicy } from "./workflow-types.js";
 
 export interface BrowserSession {
 	port: number;
@@ -23,6 +24,7 @@ export interface BrowserSession {
 	browser: Browser;
 	memoryFile: string;
 	extractDataMemoryFile: string;
+	temporaryStateDir?: string;
 	dataExtractionCoordinator: DataExtractionCoordinator;
 	pinnedMemoryContent?: string;
 	preparedPasteFiles: string[];
@@ -43,6 +45,8 @@ export interface BrowserSession {
 	activeWebsiteToolGuidance?: WebsiteToolActiveGuidance;
 	websiteToolResults: WebsiteToolResultContext[];
 	authTakeover?: SessionAuthTakeoverState;
+	workflowAuthenticationPolicy?: WorkflowAuthenticationPolicy;
+	workflowAuthenticationUnresolved?: boolean;
 	lastActionSignatureWithUrl: string | null;
 	lastProgressSignature: string | null;
 	sameActionSignatureStreak: number;

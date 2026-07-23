@@ -13,6 +13,8 @@ import type {
 } from "../agents/types.js";
 import { getDefaultBrowserAgentArtifactDirectories } from "../browser/constants.js";
 import { createSessionAuthTakeoverState } from "../auth/crypto.js";
+import { LateWorkflowAuthenticationError } from "../auth/runtime.js";
+import { TargetScopeViolationError } from "../browser/target-scope.js";
 import {
 	formatStepForPrompt,
 	logStepActionContext,
@@ -46,6 +48,7 @@ import {
 } from "./step.js";
 import type {
 	CoreDeps,
+	BorrowedRunAgentInput,
 	RunAgentGenerateStep,
 	RunAgentInput,
 	RunAgentResult,
@@ -57,6 +60,7 @@ import type {
 	ValidatorLifecycleOptions,
 } from "./types.js";
 import type { BrowserSession } from "./session-registry.js";
+import { SessionRegistry } from "./session-registry.js";
 import type { UserTakeoverCategory } from "../user-action-types.js";
 import { shouldLogTimingDuration } from "../timing-logs.js";
 import {
@@ -678,6 +682,19 @@ export async function runAgent(
 	depsOrInput: CoreDeps | RunAgentInput,
 	maybeInput?: RunAgentInput,
 ): Promise<RunAgentResult> {
+	return await runAgentInternal(depsOrInput, maybeInput);
+}
+
+interface RunAgentSessionLifecycle {
+	borrowedSession: BrowserSession;
+	cleanupSession: boolean;
+}
+
+async function runAgentInternal(
+	depsOrInput: CoreDeps | RunAgentInput,
+	maybeInput?: RunAgentInput,
+	lifecycle?: RunAgentSessionLifecycle,
+): Promise<RunAgentResult> {
 	const rawInput = isCoreDeps(depsOrInput) ? maybeInput : depsOrInput;
 	if (!rawInput) {
 		throw new Error("runAgent input is required.");
@@ -745,14 +762,29 @@ export async function runAgent(
 	let pendingValidatorFeedback: ValidatorFeedback | undefined;
 	let sessionStarted = false;
 	try {
-		await input.onBeforeSessionCreated?.(input.session);
-		const sessionResult = await withAbort(
-			abortSignal,
-			async () => await createSession(deps, input.session),
-		);
+		if (!lifecycle) {
+			await input.onBeforeSessionCreated?.(input.session);
+		}
+		const sessionResult = lifecycle
+			? {
+					session: lifecycle.borrowedSession,
+					currentUrl: await withAbort(
+						abortSignal,
+						async () =>
+							await deps.getCurrentURL(
+								lifecycle.borrowedSession.browser,
+							),
+					),
+				}
+			: await withAbort(
+					abortSignal,
+					async () => await createSession(deps, input.session),
+				);
 		sessionStarted = true;
 		sessionResult.session.authTakeover = createSessionAuthTakeoverState({
-			enabled: input.featureFlags.authTakeover,
+			enabled:
+				input.featureFlags.authTakeover &&
+				sessionResult.session.workflowAuthenticationPolicy !== "reject",
 			requestAuthDomainCandidates: input.requestAuthDomainCandidates,
 			requestAuthIdentifierForDomain:
 				input.requestAuthIdentifierForDomain,
@@ -1080,6 +1112,7 @@ export async function runAgent(
 											allowFatalActionErrors: true,
 											autoSwitchToNewTab:
 												input.autoSwitchToNewTab,
+											abortSignal,
 										},
 									),
 							}),
@@ -1358,6 +1391,12 @@ export async function runAgent(
 							? error
 							: createRunAgentAbortError(abortSignal);
 					}
+					if (
+						error instanceof LateWorkflowAuthenticationError ||
+						error instanceof TargetScopeViolationError
+					) {
+						throw error;
+					}
 					await restoreSession(session, snapshot);
 					validatorFailureCount = validatorFailureCountAtAttemptStart;
 					pendingValidatorFeedback =
@@ -1460,8 +1499,53 @@ export async function runAgent(
 			tokenTotals: sumTokenUsage(usages),
 		};
 	} finally {
-		if (sessionStarted && !input.keepSessionOpen) {
+		if (
+			sessionStarted &&
+			(!lifecycle || lifecycle.cleanupSession) &&
+			!input.keepSessionOpen
+		) {
 			await closeSession(deps, input.session.port);
 		}
 	}
+}
+
+/**
+ * Runs one workflow node against a caller-owned Chrome instance. The supplied
+ * BrowserSession must wrap a scoped CDP client; root Chrome lifecycle remains
+ * with the workflow scheduler.
+ */
+export async function runAgentWithBorrowedSession(
+	deps: CoreDeps,
+	input: BorrowedRunAgentInput,
+	session: BrowserSession,
+): Promise<RunAgentResult> {
+	if (input.sessionInput.port !== session.port) {
+		throw new Error(
+			`Borrowed session port ${session.port} does not match run input port ${input.sessionInput.port}.`,
+		);
+	}
+	if (!session.browser.targetScope) {
+		throw new Error(
+			"Borrowed workflow sessions require a target-scoped browser.",
+		);
+	}
+	const registry = new SessionRegistry();
+	registry.set(session);
+	session.workflowAuthenticationPolicy = input.authenticationPolicy;
+	const isolatedDeps: CoreDeps = { ...deps, registry };
+	const {
+		sessionInput,
+		authenticationPolicy: _authenticationPolicy,
+		cleanupSession = true,
+		...runInput
+	} = input;
+	return await runAgentInternal(
+		isolatedDeps,
+		{
+			...runInput,
+			session: sessionInput,
+			keepSessionOpen: !cleanupSession,
+		},
+		{ borrowedSession: session, cleanupSession },
+	);
 }

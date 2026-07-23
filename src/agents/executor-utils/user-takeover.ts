@@ -18,6 +18,54 @@ export interface WaitForUserTakeoverSignalOptions {
 	log?: (line: string) => void;
 	browser?: Browser;
 	pollIntervalMs?: number;
+	abortSignal?: AbortSignal;
+}
+
+function createAbortError(signal: AbortSignal): Error {
+	const error = new Error(
+		signal.reason instanceof Error
+			? signal.reason.message
+			: "Browser user takeover was cancelled.",
+	);
+	error.name = "AbortError";
+	return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+	if (signal?.aborted) throw createAbortError(signal);
+}
+
+async function waitWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+	throwIfAborted(signal);
+	if (!signal) {
+		await new Promise((resolve) => setTimeout(resolve, ms));
+		return;
+	}
+	await new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(done, ms);
+		function done() {
+			signal?.removeEventListener("abort", aborted);
+			resolve();
+		}
+		function aborted() {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", aborted);
+			reject(createAbortError(signal!));
+		}
+		signal.addEventListener("abort", aborted, { once: true });
+	});
+}
+
+async function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+	throwIfAborted(signal);
+	if (!signal) return await promise;
+	return await new Promise<T>((resolve, reject) => {
+		const aborted = () => reject(createAbortError(signal));
+		signal.addEventListener("abort", aborted, { once: true });
+		promise.then(resolve, reject).finally(() =>
+			signal.removeEventListener("abort", aborted),
+		);
+	});
 }
 
 function normalizeSignal(value: string): string {
@@ -316,6 +364,7 @@ export async function waitForUserTakeoverSignal(
 	const resumeSignal = normalizeSignal(options.resumeSignal || DEFAULT_SIGNAL);
 	const reason = validateUserTakeoverReason(options.reason);
 	const pollIntervalMs = options.pollIntervalMs ?? OVERLAY_POLL_MS;
+	throwIfAborted(options.abortSignal);
 
 	log(`       [user_takeover] Reason: ${reason}`);
 	if (options.browser) {
@@ -323,6 +372,7 @@ export async function waitForUserTakeoverSignal(
 			`       [user_takeover] Please take control of the browser now. Click "Resume Agent" in the page overlay when you are ready for automation to continue.`,
 		);
 		while (true) {
+			throwIfAborted(options.abortSignal);
 			await ensureTakeoverOverlay(options.browser, reason, resumeSignal);
 			if (await checkBrowserResumeSignal(options.browser, resumeSignal)) {
 				await clearTakeoverOverlay(options.browser);
@@ -331,7 +381,7 @@ export async function waitForUserTakeoverSignal(
 				);
 				return;
 			}
-			await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+			await waitWithAbort(pollIntervalMs, options.abortSignal);
 		}
 	}
 
@@ -339,8 +389,11 @@ export async function waitForUserTakeoverSignal(
 		`       [user_takeover] Please take control of the browser now. Type "${resumeSignal}" when you are ready for automation to continue.`,
 	);
 	while (true) {
-		const answer = await readSignal(
-			`[user_takeover] Type "${resumeSignal}" to resume automation: `,
+		const answer = await withAbort(
+			readSignal(
+				`[user_takeover] Type "${resumeSignal}" to resume automation: `,
+			),
+			options.abortSignal,
 		);
 		if (normalizeSignal(answer) === resumeSignal) {
 			log(

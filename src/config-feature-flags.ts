@@ -1,4 +1,6 @@
 export interface ConfigFeatureFlags {
+	/** Analyze eligible tasks and execute complex ones as a browser-agent DAG. */
+	workflowOrchestration: boolean;
 	/** Attach a fresh full-page screenshot to the latest executor prompt before each step. */
 	preStepScreenshotInLatestUserPrompt: boolean;
 	/** Let the executor pause and request manual interaction from the user. */
@@ -20,6 +22,7 @@ export interface ConfigFeatureFlags {
 }
 
 export const configFeatureFlags: ConfigFeatureFlags = {
+	workflowOrchestration: false,
 	preStepScreenshotInLatestUserPrompt: true,
 	userTakeoverTool: true,
 	authTakeover: false,
@@ -37,6 +40,9 @@ export function mergeConfigFeatureFlags(
 ): ConfigFeatureFlags {
 	return {
 		...base,
+		...(overrides.workflowOrchestration !== undefined
+			? { workflowOrchestration: overrides.workflowOrchestration }
+			: {}),
 		...(overrides.preStepScreenshotInLatestUserPrompt !== undefined
 			? {
 					preStepScreenshotInLatestUserPrompt:
@@ -75,6 +81,10 @@ export function mergeConfigFeatureFlags(
 export function setConfigFeatureFlags(
 	flags: Partial<ConfigFeatureFlags>,
 ): void {
+	if (flags.workflowOrchestration !== undefined) {
+		configFeatureFlags.workflowOrchestration =
+			flags.workflowOrchestration;
+	}
 	if (flags.preStepScreenshotInLatestUserPrompt !== undefined) {
 		configFeatureFlags.preStepScreenshotInLatestUserPrompt =
 			flags.preStepScreenshotInLatestUserPrompt;

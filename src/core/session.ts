@@ -1,4 +1,7 @@
 import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import type { Browser } from "../browser/types.js";
 import type { BrowserSession } from "./session-registry.js";
 import type {
 	CoreDeps,
@@ -66,7 +69,97 @@ export async function closeAndDeleteSession(
 	) {
 		fs.unlinkSync(session.extractDataMemoryFile);
 	}
+	if (
+		session.temporaryStateDir &&
+		fs.existsSync(session.temporaryStateDir)
+	) {
+		fs.rmdirSync(session.temporaryStateDir);
+	}
 	deps.registry.delete(session.port);
+}
+
+function normalizePreparedPasteFiles(value: unknown): string[] {
+	return Array.isArray(value)
+		? value
+				.map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+				.filter(
+					(entry) =>
+						entry.startsWith("./") &&
+						!entry.split("/").some((part) => part === ".."),
+				)
+		: [];
+}
+
+/** Creates independent node state around an already-connected scoped browser. */
+export function createBorrowedSession(
+	input: CreateSessionInput,
+	browser: Browser,
+): BrowserSession {
+	if (input.port !== browser.port) {
+		throw new Error(
+			`Borrowed browser port ${browser.port} does not match session port ${input.port}.`,
+		);
+	}
+	const stateDir = fs.mkdtempSync(
+		path.join(os.tmpdir(), `browser-agent-workflow-${input.port}-`),
+	);
+	const memoryFile = path.join(stateDir, "memory.txt");
+	const extractDataMemoryFile = path.join(stateDir, "extract-data-memory.txt");
+	fs.writeFileSync(memoryFile, "", "utf-8");
+	fs.writeFileSync(extractDataMemoryFile, "", "utf-8");
+	browser.fileWorkspaceRoot = input.fileWorkspaceRoot;
+	browser.downloadRootDir = input.downloadRootDir ?? input.downloadDir;
+
+	return {
+		port: input.port,
+		headless: input.headless,
+		browser,
+		memoryFile,
+		extractDataMemoryFile,
+		temporaryStateDir: stateDir,
+		dataExtractionCoordinator: new DataExtractionCoordinator(),
+		pinnedMemoryContent:
+			typeof input.pinnedMemoryContent === "string" &&
+			input.pinnedMemoryContent.length > 0
+				? input.pinnedMemoryContent
+				: undefined,
+		preparedPasteFiles: normalizePreparedPasteFiles(input.preparedPasteFiles),
+		activePlan: [],
+		planStatuses: [],
+		keepPlanInHistory: false,
+		recentExecutions: [],
+		lastTask: null,
+		pendingMemoryRead: false,
+		previousInteractionErrors: [],
+		previousToolObservations: [],
+		previousStepTabs: null,
+		downloadedFileSignatures: null,
+		downloadedNewFilePaths: new Set<string>(),
+		screenshotToolObservations: [],
+		screenshotToolSignalCaptures: [],
+		excludedWebsiteToolNames: new Set<string>(),
+		activeWebsiteToolGuidance: undefined,
+		websiteToolResults: [],
+		lastActionSignatureWithUrl: null,
+		lastProgressSignature: null,
+		sameActionSignatureStreak: 0,
+		noProgressStreak: 0,
+		incrementalDomContext: {},
+	};
+}
+
+export function assertAuthenticationBarrierCleared(
+	session: BrowserSession,
+): void {
+	if (
+		session.workflowAuthenticationUnresolved ||
+		session.authTakeover?.suppressScreenshots ||
+		(session.authTakeover?.protectedBids.size ?? 0) > 0
+	) {
+		throw new Error(
+			"Workflow authentication preparation is unresolved or still has protected browser state.",
+		);
+	}
 }
 
 export async function createSession(

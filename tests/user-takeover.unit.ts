@@ -185,4 +185,24 @@ describe("user-takeover", () => {
 		}
 		assert.include(errorMessage, "must describe a sensitive interaction");
 	});
+
+	it("cancels a blocking takeover wait", async () => {
+		const controller = new AbortController();
+		const pending = waitForUserTakeoverSignal({
+			reason: "Enter the OTP code.",
+			readSignal: async () => await new Promise<string>(() => {}),
+			abortSignal: controller.signal,
+			log: () => {},
+		});
+		controller.abort();
+
+		let error: unknown;
+		try {
+			await pending;
+		} catch (caught) {
+			error = caught;
+		}
+		assert.instanceOf(error, Error);
+		assert.strictEqual((error as Error).name, "AbortError");
+	});
 });

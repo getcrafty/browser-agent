@@ -3,43 +3,43 @@ import type { BrowserAgentArtifactDirectories } from "../browser/constants.js";
 import type { ExecutorPromptOptions } from "../agents/prompts.js";
 import type { ConfigFeatureFlags } from "../config-feature-flags.js";
 import type {
-	Action,
-	AuthTakeoverAttemptEvent,
-	ChatJSONResult,
-	ExtractionStepUsage,
-	ExecuteActionsResult,
-	LLMOptions,
-	MainLoopStepEntry,
-	Message,
-	Plan,
-	Provider,
-	RecapStageUsage,
-	StageModelInvocationTrace,
-	StepResult as ModelStepResult,
-	StepTokenUsage,
-	ScreenshotToolCaptureCall,
-	ScreenshotToolObservation,
-	TokenUsage,
+  Action,
+  AuthTakeoverAttemptEvent,
+  ChatJSONResult,
+  ExtractionStepUsage,
+  ExecuteActionsResult,
+  LLMOptions,
+  MainLoopStepEntry,
+  Message,
+  Plan,
+  Provider,
+  RecapStageUsage,
+  StageModelInvocationTrace,
+  StepResult as ModelStepResult,
+  StepTokenUsage,
+  ScreenshotToolCaptureCall,
+  ScreenshotToolObservation,
+  TokenUsage,
 } from "../agents/types.js";
 import type {
-	RequestAuthDomainCandidates,
-	RequestAuthIdentifierForDomain,
-	RequestAuthPasswordForDomain,
+  RequestAuthDomainCandidates,
+  RequestAuthIdentifierForDomain,
+  RequestAuthPasswordForDomain,
 } from "../auth/types.js";
 import { choosePreExecutionDomNonClickableIdsToExclude } from "../agents/pre-execution-dom-pruning.js";
 import { pruneLiveDomByIdentifiers } from "../browser/index.js";
 import type { extractDataResultsFromSnapshot } from "../agents/data-extraction.js";
 import {
-	buildStepMessages,
-	buildStepPayload,
+  buildStepMessages,
+  buildStepPayload,
 } from "../agents/executor-utils/step-execution.js";
 import { getExecutorSystem } from "../agents/prompts.js";
 import { executeActions } from "../agents/executor-utils/action-execution.js";
 import {
-	capturePreStepScreenshotDataUrl,
-	formatTabTitle,
-	getNewlyOpenedTabs,
-	resolveCurrentTabIndex,
+  capturePreStepScreenshotDataUrl,
+  formatTabTitle,
+  getNewlyOpenedTabs,
+  resolveCurrentTabIndex,
 } from "../agents/executor-utils/step-context.js";
 import type { SessionRegistry, BrowserSession } from "./session-registry.js";
 import type { BrowserRemoteInput } from "../browser/types.js";
@@ -48,636 +48,663 @@ import type { UserTakeoverCategory } from "../user-action-types.js";
 import type { switchTab } from "../browser/index.js";
 import type { waitForAllOpenTabsToSettle } from "../browser/index.js";
 import type { TaskExecutionOverridesIndex } from "./task-execution-overrides.js";
+import type {
+  OnRunTaskWorkflowPlanned,
+  OnWorkflowPlanned,
+  WorkflowAuthenticationPolicy,
+  WorkflowNodeKind,
+  WorkflowResult,
+} from "./workflow-types.js";
 
 export interface PreprocessStageLLMs {
-	findTargetURL: LLMOptions;
-	dismissCookieBanner: LLMOptions;
-	createPlan: LLMOptions;
-	preExecutionDomPruning: LLMOptions;
+  /** Optional dedicated workflow classifier/planner; createPlan is the fallback. */
+  workflowPlanner?: LLMOptions;
+  findTargetURL: LLMOptions;
+  dismissCookieBanner: LLMOptions;
+  createPlan: LLMOptions;
+  preExecutionDomPruning: LLMOptions;
 }
 
 export interface RunTaskStageLLMs extends PreprocessStageLLMs {
-	runAgent: LLMOptions;
-	dataExtraction: LLMOptions;
-	verifySuccess?: LLMOptions;
+  runAgent: LLMOptions;
+  dataExtraction: LLMOptions;
+  verifySuccess?: LLMOptions;
 }
 
 export interface ValidatorLifecycleOptions {
-	mode: "terminal" | "retry";
-	maxFailures: number;
+  mode: "terminal" | "retry";
+  maxFailures: number;
 }
 
 export interface ValidatorFeedback {
-	failure: number;
-	maxFailures: number;
-	summary: string;
-	reasons: string[];
-	instruction: string;
+  failure: number;
+  maxFailures: number;
+  summary: string;
+  reasons: string[];
+  instruction: string;
 }
 
 export interface TokenUsageTotals {
-	input_tokens: number;
-	cached_input_tokens: number;
-	reasoning_tokens: number;
-	non_reasoning_output_tokens: number;
-	output_tokens: number;
-	total_tokens: number;
-	generation_time_ms: number;
+  input_tokens: number;
+  cached_input_tokens: number;
+  reasoning_tokens: number;
+  non_reasoning_output_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  generation_time_ms: number;
 }
 
 export interface TokenUsageArtifactInvocation {
-	sequence: number;
-	kind: "stage" | "executor_step";
-	phase: "preprocess" | "executor" | "verification" | "other";
-	stage: string;
-	provider?: Provider;
-	model?: string;
-	step?: number;
-	stepKind?: MainLoopStepEntry["step_kind"];
-	modelAttempt?: number;
-	usage: TokenUsage | null;
+  sequence: number;
+  kind: "stage" | "executor_step";
+  phase: "preprocess" | "executor" | "verification" | "other";
+  stage: string;
+  provider?: Provider;
+  model?: string;
+  step?: number;
+  stepKind?: MainLoopStepEntry["step_kind"];
+  modelAttempt?: number;
+  workflowNodeId?: string;
+  workflowNodeKind?: WorkflowNodeKind;
+  usage: TokenUsage | null;
 }
 
 export interface TokenUsageArtifactAttempt {
-	runIndex: number;
-	retryAttempt: number;
-	completed: boolean;
-	successful: boolean;
-	invocations: TokenUsageArtifactInvocation[];
-	totals: TokenUsageTotals;
+  runIndex: number;
+  retryAttempt: number;
+  completed: boolean;
+  successful: boolean;
+  invocations: TokenUsageArtifactInvocation[];
+  totals: TokenUsageTotals;
 }
 
 export interface TaskTokenUsageArtifact {
-	schemaVersion: 1;
-	taskIndex: number;
-	task: string;
-	attempts: TokenUsageArtifactAttempt[];
-	totals: TokenUsageTotals;
+  schemaVersion: 1;
+  taskIndex: number;
+  task: string;
+  attempts: TokenUsageArtifactAttempt[];
+  totals: TokenUsageTotals;
 }
 
 export interface CoreDeps {
-	featureFlags: ConfigFeatureFlags;
-	userActionBehavior: "block" | "return" | "callback";
-	onUserActionRequired?: (input: {
-		kind: "browser_user_takeover";
-		reason: string;
-		category?: UserTakeoverCategory;
-	}) => Promise<void>;
-	requestAgentTakeover?: (
-		input: BrowserAgentTakeoverRequest,
-	) => Promise<BrowserAgentTakeoverResult>;
-	registry: SessionRegistry;
-	isPortInUse: (port: number) => Promise<boolean>;
-	launchBrowser: (
-		port: number,
-		headless: boolean,
-		proxy?: {
-			host: string;
-			port: number;
-		},
-		downloadDir?: string,
-		userDataDir?: string,
-		windowMode?: "visible" | "hidden",
-		executablePath?: string,
-	) => Promise<Browser>;
-	closeBrowser: (browser: Browser) => Promise<void>;
-	navigateBrowser: (browser: Browser, url: string) => Promise<void>;
-	getCurrentURL: (browser: Browser) => Promise<string>;
-	getSimplifiedDOM: (
-		browser: Browser,
-		options?: SimplifyDomOptions,
-	) => Promise<string>;
-	listTabs: (browser: Browser) => Promise<Tab[]>;
-	extractValidBids: (dom: string) => string[];
-	findTargetURL: (
-		task: string,
-		options: LLMOptions,
-		traceOptions?: {
-			onTrace?: (trace: StageModelInvocationTrace) => void;
-			meta?: Record<string, unknown>;
-		},
-	) => Promise<string>;
-	dismissCookieBanner: (
-		browser: Browser,
-		maxAttempts: number,
-		options: LLMOptions,
-		traceOptions?: {
-			onTrace?: (trace: StageModelInvocationTrace) => void;
-			meta?: Record<string, unknown>;
-		},
-	) => Promise<void>;
-	createPlan: (
-		task: string,
-		dom: string,
-		options: LLMOptions,
-		traceOptions?: {
-			onTrace?: (trace: StageModelInvocationTrace) => void;
-			meta?: Record<string, unknown>;
-		},
-		runtimeContext?: {
-			memoryAvailable?: boolean;
-			preparedPasteFiles?: string[];
-			agentTakeoverAvailable?: boolean;
-			currentUrl?: string;
-			activeWebsiteToolGuidance?: import("../website-tools.js").WebsiteToolActiveGuidance;
-		},
-	) => Promise<Plan>;
-	choosePreExecutionDomNonClickableIdsToExclude: typeof choosePreExecutionDomNonClickableIdsToExclude;
-	pruneLiveDomByIdentifiers: typeof pruneLiveDomByIdentifiers;
-	buildStepPayload: typeof buildStepPayload;
-	buildStepMessages: typeof buildStepMessages;
-	getExecutorSystem: (options?: ExecutorPromptOptions) => string;
-	normalizeActionList: (actions: unknown) => Action[];
-	normalizeActionListWithDiagnostics?: (actions: unknown) => {
-		actions: Action[];
-		diagnostics: string[];
-	};
-	executeActions: typeof executeActions;
-	extractDataResultsFromSnapshot: typeof extractDataResultsFromSnapshot;
-	switchTab: typeof switchTab;
-	waitForAllOpenTabsToSettle: typeof waitForAllOpenTabsToSettle;
-	resolveCurrentTabIndex: typeof resolveCurrentTabIndex;
-	getNewlyOpenedTabs: typeof getNewlyOpenedTabs;
-	capturePreStepScreenshotDataUrl: typeof capturePreStepScreenshotDataUrl;
-	estimateTokenCount: (text: string) => number;
-	formatTabTitle: typeof formatTabTitle;
-	createSessionMemoryFile: (port: number) => string;
-	createSessionExtractDataMemoryFile: (port: number) => string;
-	waitForAutomationPermission: () => Promise<void>;
-	dispatchRemoteInput: (
-		browser: Browser,
-		input: BrowserRemoteInput,
-	) => Promise<void>;
-	verifyTaskSuccess?: (
-		input: import("../agents/success-verifier.js").VerifyTaskSuccessInput,
-	) => Promise<import("../agents/types.js").SuccessVerificationResult>;
-	defaultAuthProbeLLMOptions?: LLMOptions;
-	defaultSuccessVerifierLLMOptions?: LLMOptions;
+  featureFlags: ConfigFeatureFlags;
+  userActionBehavior: "block" | "return" | "callback";
+  onUserActionRequired?: (input: {
+    kind: "browser_user_takeover";
+    reason: string;
+    category?: UserTakeoverCategory;
+  }) => Promise<void>;
+  requestAgentTakeover?: (
+    input: BrowserAgentTakeoverRequest,
+  ) => Promise<BrowserAgentTakeoverResult>;
+  registry: SessionRegistry;
+  isPortInUse: (port: number) => Promise<boolean>;
+  launchBrowser: (
+    port: number,
+    headless: boolean,
+    proxy?: {
+      host: string;
+      port: number;
+    },
+    downloadDir?: string,
+    userDataDir?: string,
+    windowMode?: "visible" | "hidden",
+    executablePath?: string,
+  ) => Promise<Browser>;
+  closeBrowser: (browser: Browser) => Promise<void>;
+  navigateBrowser: (browser: Browser, url: string) => Promise<void>;
+  getCurrentURL: (browser: Browser) => Promise<string>;
+  getSimplifiedDOM: (
+    browser: Browser,
+    options?: SimplifyDomOptions,
+  ) => Promise<string>;
+  listTabs: (browser: Browser) => Promise<Tab[]>;
+  extractValidBids: (dom: string) => string[];
+  findTargetURL: (
+    task: string,
+    options: LLMOptions,
+    traceOptions?: {
+      onTrace?: (trace: StageModelInvocationTrace) => void;
+      meta?: Record<string, unknown>;
+    },
+  ) => Promise<string>;
+  dismissCookieBanner: (
+    browser: Browser,
+    maxAttempts: number,
+    options: LLMOptions,
+    traceOptions?: {
+      onTrace?: (trace: StageModelInvocationTrace) => void;
+      meta?: Record<string, unknown>;
+    },
+  ) => Promise<void>;
+  createPlan: (
+    task: string,
+    dom: string,
+    options: LLMOptions,
+    traceOptions?: {
+      onTrace?: (trace: StageModelInvocationTrace) => void;
+      meta?: Record<string, unknown>;
+    },
+    runtimeContext?: {
+      memoryAvailable?: boolean;
+      preparedPasteFiles?: string[];
+      agentTakeoverAvailable?: boolean;
+      currentUrl?: string;
+      activeWebsiteToolGuidance?: import("../website-tools.js").WebsiteToolActiveGuidance;
+    },
+  ) => Promise<Plan>;
+  choosePreExecutionDomNonClickableIdsToExclude: typeof choosePreExecutionDomNonClickableIdsToExclude;
+  pruneLiveDomByIdentifiers: typeof pruneLiveDomByIdentifiers;
+  buildStepPayload: typeof buildStepPayload;
+  buildStepMessages: typeof buildStepMessages;
+  getExecutorSystem: (options?: ExecutorPromptOptions) => string;
+  normalizeActionList: (actions: unknown) => Action[];
+  normalizeActionListWithDiagnostics?: (actions: unknown) => {
+    actions: Action[];
+    diagnostics: string[];
+  };
+  executeActions: typeof executeActions;
+  extractDataResultsFromSnapshot: typeof extractDataResultsFromSnapshot;
+  switchTab: typeof switchTab;
+  waitForAllOpenTabsToSettle: typeof waitForAllOpenTabsToSettle;
+  resolveCurrentTabIndex: typeof resolveCurrentTabIndex;
+  getNewlyOpenedTabs: typeof getNewlyOpenedTabs;
+  capturePreStepScreenshotDataUrl: typeof capturePreStepScreenshotDataUrl;
+  estimateTokenCount: (text: string) => number;
+  formatTabTitle: typeof formatTabTitle;
+  createSessionMemoryFile: (port: number) => string;
+  createSessionExtractDataMemoryFile: (port: number) => string;
+  waitForAutomationPermission: () => Promise<void>;
+  dispatchRemoteInput: (
+    browser: Browser,
+    input: BrowserRemoteInput,
+  ) => Promise<void>;
+  verifyTaskSuccess?: (
+    input: import("../agents/success-verifier.js").VerifyTaskSuccessInput,
+  ) => Promise<import("../agents/types.js").SuccessVerificationResult>;
+  defaultAuthProbeLLMOptions?: LLMOptions;
+  defaultSuccessVerifierLLMOptions?: LLMOptions;
 }
 
 export interface CreateSessionInput {
-	port: number;
-	headless: boolean;
-	windowMode?: "visible" | "hidden";
-	url?: string;
-	downloadDir?: string;
-	downloadRootDir?: string;
-	fileWorkspaceRoot?: string;
-	pinnedMemoryContent?: string;
-	preparedPasteFiles?: string[];
-	userDataDir?: string;
-	executablePath?: string;
-	proxy?: {
-		host: string;
-		port: number;
-	};
-	forceRestart?: boolean;
+  port: number;
+  headless: boolean;
+  windowMode?: "visible" | "hidden";
+  url?: string;
+  downloadDir?: string;
+  downloadRootDir?: string;
+  fileWorkspaceRoot?: string;
+  pinnedMemoryContent?: string;
+  preparedPasteFiles?: string[];
+  userDataDir?: string;
+  executablePath?: string;
+  proxy?: {
+    host: string;
+    port: number;
+  };
+  forceRestart?: boolean;
 }
 
 export interface BrowserAgentTakeoverRequest {
-	stepNumber?: number;
-	request: string;
-	currentUrl?: string;
-	openTabs: string[];
-	workspaceFiles: string[];
-	downloadedFiles: string[];
-	maxChars?: number;
+  stepNumber?: number;
+  request: string;
+  currentUrl?: string;
+  openTabs: string[];
+  workspaceFiles: string[];
+  downloadedFiles: string[];
+  maxChars?: number;
 }
 
 export interface BrowserAgentTakeoverResult {
-	status: "completed" | "not_applicable" | "failed";
-	memoryContent?: string;
-	summary?: string;
-	sourceFiles?: string[];
-	error?: string;
+  status: "completed" | "not_applicable" | "failed";
+  memoryContent?: string;
+  summary?: string;
+  sourceFiles?: string[];
+  error?: string;
 }
 
 export interface CreateSessionResult {
-	session: BrowserSession;
-	currentUrl: string;
+  session: BrowserSession;
+  currentUrl: string;
 }
 
 export interface PreprocessTaskInput {
-	port: number;
-	userTask: string;
-	url?: string;
-	stageLLMs: PreprocessStageLLMs;
-	initialPlanOverride?: string[];
-	log?: (message: string) => void;
-	recordModelInvocation?: (trace: StageModelInvocationTrace) => void;
-	savePlanningDom?: (dom: string) => void | Promise<void>;
-	savePreExecutionPrunerDom?: (dom: string) => void | Promise<void>;
+  port: number;
+  userTask: string;
+  url?: string;
+  stageLLMs: PreprocessStageLLMs;
+  initialPlanOverride?: string[];
+  log?: (message: string) => void;
+  recordModelInvocation?: (trace: StageModelInvocationTrace) => void;
+  savePlanningDom?: (dom: string) => void | Promise<void>;
+  savePreExecutionPrunerDom?: (dom: string) => void | Promise<void>;
 }
 
 export interface PreprocessTaskResult {
-	target_url: string;
-	final_url: string;
-	plan: string[];
-	dom_pruning: {
-		thinking: string;
-		excluded_non_clickable_ids: string[];
-		token_usage: {
-			input_tokens: number;
-			output_tokens: number;
-			total_tokens: number;
-		};
-	};
-	context: {
-		current_url: string;
-		open_tabs: string[];
-		current_tab: number;
-	};
-	execution_overrides?: {
-		initialPlanOverride?: boolean;
-	};
+  target_url: string;
+  final_url: string;
+  plan: string[];
+  dom_pruning: {
+    thinking: string;
+    excluded_non_clickable_ids: string[];
+    token_usage: {
+      input_tokens: number;
+      output_tokens: number;
+      total_tokens: number;
+    };
+  };
+  context: {
+    current_url: string;
+    open_tabs: string[];
+    current_tab: number;
+  };
+  execution_overrides?: {
+    initialPlanOverride?: boolean;
+  };
 }
 
 export interface StepHistoryEntry {
-	payload: Record<string, unknown>;
-	assistant: unknown;
-	reasoningTokens?: string;
+  payload: Record<string, unknown>;
+  assistant: unknown;
+  reasoningTokens?: string;
 }
 
 export interface CreatePromptForStepInput {
-	port: number;
-	userTask: string;
-	stepsHistory: StepHistoryEntry[];
-	stepNumber?: number;
-	llmOptions?: LLMOptions;
-	autoSwitchToNewTab?: boolean;
-	finalizationInstruction?: string;
-	forceMemoryContent?: boolean;
-	validatorFeedback?: ValidatorFeedback;
+  port: number;
+  userTask: string;
+  stepsHistory: StepHistoryEntry[];
+  stepNumber?: number;
+  llmOptions?: LLMOptions;
+  autoSwitchToNewTab?: boolean;
+  finalizationInstruction?: string;
+  forceMemoryContent?: boolean;
+  validatorFeedback?: ValidatorFeedback;
 }
 
 export interface CreatePromptForStepResult {
-	prompt: {
-		messages: unknown[];
-		payload: Record<string, unknown>;
-	};
-	artifacts: {
-		preStepScreenshotDataUrl?: string;
-		canonicalSimplifiedDom: string;
-	};
-	context: {
-		current_url: string;
-		open_tabs: string[];
-		current_tab: number;
-		valid_bids_count: number;
-		latest_user_prompt_token_count: number;
-	};
+  prompt: {
+    messages: unknown[];
+    payload: Record<string, unknown>;
+  };
+  artifacts: {
+    preStepScreenshotDataUrl?: string;
+    canonicalSimplifiedDom: string;
+  };
+  context: {
+    current_url: string;
+    open_tabs: string[];
+    current_tab: number;
+    valid_bids_count: number;
+    latest_user_prompt_token_count: number;
+  };
 }
 
 export interface BrowseInput {
-	port: number;
-	generatedActions: unknown;
-	generatedActionsAreNormalized?: boolean;
-	userTask?: string;
-	simplifiedDom?: string;
-	dataExtractionLLMOptions?: LLMOptions;
-	recordModelInvocation?: (trace: StageModelInvocationTrace) => void;
-	stepNumber?: number;
-	allowFatalActionErrors?: boolean;
-	autoSwitchToNewTab?: boolean;
-	promptDownloadedFiles?: string[];
-	promptWorkspaceFiles?: string[];
-	memoryContentAvailable?: boolean;
+  port: number;
+  generatedActions: unknown;
+  generatedActionsAreNormalized?: boolean;
+  userTask?: string;
+  simplifiedDom?: string;
+  dataExtractionLLMOptions?: LLMOptions;
+  recordModelInvocation?: (trace: StageModelInvocationTrace) => void;
+  stepNumber?: number;
+  allowFatalActionErrors?: boolean;
+  autoSwitchToNewTab?: boolean;
+  promptDownloadedFiles?: string[];
+  promptWorkspaceFiles?: string[];
+  memoryContentAvailable?: boolean;
+  abortSignal?: AbortSignal;
 }
 
 export interface BrowseResult {
-	execution: {
-		pending_memory_read: boolean;
-		pending_plan_regeneration: boolean;
-		returned_result?: string;
-		interaction_errors: string[];
-		screenshot_tool_observations: ScreenshotToolObservation[];
-		screenshot_tool_captures: ScreenshotToolCaptureCall[];
-		auth_takeover_attempts?: AuthTakeoverAttemptEvent[];
-		user_takeover?: {
-			reason: string;
-			category?: UserTakeoverCategory;
-		};
-	};
-	context: {
-		current_url: string;
-		open_tabs: string[];
-		current_tab: number;
-		downloaded_files: string[];
-		html: string;
-		valid_bids: string[];
-	};
+  execution: {
+    pending_memory_read: boolean;
+    pending_plan_regeneration: boolean;
+    returned_result?: string;
+    interaction_errors: string[];
+    screenshot_tool_observations: ScreenshotToolObservation[];
+    screenshot_tool_captures: ScreenshotToolCaptureCall[];
+    auth_takeover_attempts?: AuthTakeoverAttemptEvent[];
+    user_takeover?: {
+      reason: string;
+      category?: UserTakeoverCategory;
+    };
+  };
+  context: {
+    current_url: string;
+    open_tabs: string[];
+    current_tab: number;
+    downloaded_files: string[];
+    html: string;
+    valid_bids: string[];
+  };
 }
 
 export interface ProcessModelStepOutputInput {
-	rawStepOutput: unknown;
-	promptPayload: Record<string, unknown>;
-	stepsHistory: StepHistoryEntry[];
-	executorProvider?: Provider;
-	reasoningTokens?: string;
-	stepNumber?: number;
-	dataExtractionLLMOptions?: LLMOptions;
-	recordModelInvocation?: (trace: StageModelInvocationTrace) => void;
-	keepPlanInHistory?: boolean;
-	planLength?: number;
-	sessionPlanStatuses?: Array<"DONE" | "TODO" | "REGRESSED">;
-	allowModelResultCompletion?: boolean;
-	allowFatalActionErrors?: boolean;
-	autoSwitchToNewTab?: boolean;
+  rawStepOutput: unknown;
+  promptPayload: Record<string, unknown>;
+  stepsHistory: StepHistoryEntry[];
+  executorProvider?: Provider;
+  reasoningTokens?: string;
+  stepNumber?: number;
+  dataExtractionLLMOptions?: LLMOptions;
+  recordModelInvocation?: (trace: StageModelInvocationTrace) => void;
+  keepPlanInHistory?: boolean;
+  planLength?: number;
+  sessionPlanStatuses?: Array<"DONE" | "TODO" | "REGRESSED">;
+  allowModelResultCompletion?: boolean;
+  allowFatalActionErrors?: boolean;
+  autoSwitchToNewTab?: boolean;
+  abortSignal?: AbortSignal;
 }
 
 export interface ProcessModelStepOutputResult {
-	step: ModelStepResult;
-	history_entry: StepHistoryEntry;
-	successful: boolean;
-	successVerification?: import("../agents/types.js").SuccessVerificationResult;
+  step: ModelStepResult;
+  history_entry: StepHistoryEntry;
+  successful: boolean;
+  successVerification?: import("../agents/types.js").SuccessVerificationResult;
 }
 
 export type StepInput =
-	| ({ mode: "create_prompt_for_step" } & CreatePromptForStepInput)
-	| ({ mode: "browse" } & BrowseInput)
-	| ({ mode: "process_model_step_output" } & ProcessModelStepOutputInput);
+  | ({ mode: "create_prompt_for_step" } & CreatePromptForStepInput)
+  | ({ mode: "browse" } & BrowseInput)
+  | ({ mode: "process_model_step_output" } & ProcessModelStepOutputInput);
 
 export type StepResult =
-	| ({ mode: "create_prompt_for_step" } & CreatePromptForStepResult)
-	| ({ mode: "browse" } & BrowseResult)
-	| ({ mode: "process_model_step_output" } & ProcessModelStepOutputResult);
+  | ({ mode: "create_prompt_for_step" } & CreatePromptForStepResult)
+  | ({ mode: "browse" } & BrowseResult)
+  | ({ mode: "process_model_step_output" } & ProcessModelStepOutputResult);
 
 export type StepMode = StepInput["mode"];
 
 export type StepInputByMode<TMode extends StepMode> = Extract<
-	StepInput,
-	{ mode: TMode }
+  StepInput,
+  { mode: TMode }
 >;
 
 export type StepResultByMode<TMode extends StepMode> = Extract<
-	StepResult,
-	{ mode: TMode }
+  StepResult,
+  { mode: TMode }
 >;
 
 export interface RunTaskBrowserLaunchOptions {
-	port?: number;
-	headless: boolean;
-	proxy?: {
-		host: string;
-		port: number;
-	};
-	url?: string;
-	downloadDir?: string;
-	fileWorkspaceRoot?: string;
-	userDataDir?: string;
-	executablePath?: string;
-	workerId: number;
+  port?: number;
+  headless: boolean;
+  proxy?: {
+    host: string;
+    port: number;
+  };
+  url?: string;
+  downloadDir?: string;
+  fileWorkspaceRoot?: string;
+  userDataDir?: string;
+  executablePath?: string;
+  workerId: number;
 }
 
 export interface RunTaskPersistenceCallbacks {
-	appendJsonlEntry: (entry: unknown, runIndex: number) => void;
-	saveTokenUsageAttempt?: (attempt: TokenUsageArtifactAttempt) => void;
-	savePreExecutionPrunerDom?: (params: {
-		dom: string;
-		runIndex: number;
-		attempt: number;
-	}) => void;
-	savePlanningDom?: (params: {
-		dom: string;
-		runIndex: number;
-		attempt: number;
-	}) => void;
-	reportSingleRunExecution?: (
-		result: string,
-		steps: number,
-		tokenUsage: StepTokenUsage[],
-		successful: boolean,
-		successVerification?: import("../agents/types.js").SuccessVerificationResult,
-		stepRuntimeMetrics?: StepRuntimeMetrics[],
-		extractionStepUsage?: ExtractionStepUsage[],
-		stageUsage?: RecapStageUsage[],
-	) => void;
+  appendJsonlEntry: (entry: unknown, runIndex: number) => void;
+  saveTokenUsageAttempt?: (attempt: TokenUsageArtifactAttempt) => void;
+  savePreExecutionPrunerDom?: (params: {
+    dom: string;
+    runIndex: number;
+    attempt: number;
+  }) => void;
+  savePlanningDom?: (params: {
+    dom: string;
+    runIndex: number;
+    attempt: number;
+  }) => void;
+  reportSingleRunExecution?: (
+    result: string,
+    steps: number,
+    tokenUsage: StepTokenUsage[],
+    successful: boolean,
+    successVerification?: import("../agents/types.js").SuccessVerificationResult,
+    stepRuntimeMetrics?: StepRuntimeMetrics[],
+    extractionStepUsage?: ExtractionStepUsage[],
+    stageUsage?: RecapStageUsage[],
+  ) => void;
 }
 
 export interface RunTaskInput {
-	task: string;
-	taskNumber: number;
-	totalTasks: number;
-	taskRuns: number;
-	taskRunRetryCount: number;
-	taskUntilSuccessMaxAttempts?: number;
-	maxSteps: number;
-	validatorLifecycle?: ValidatorLifecycleOptions;
-	stageLLMs: RunTaskStageLLMs;
-	requestAuthDomainCandidates?: RequestAuthDomainCandidates;
-	requestAuthIdentifierForDomain?: RequestAuthIdentifierForDomain;
-	requestAuthPasswordForDomain?: RequestAuthPasswordForDomain;
-	onUserActionRequired?: (input: {
-		kind: "browser_user_takeover";
-		reason: string;
-		category?: UserTakeoverCategory;
-	}) => Promise<void>;
-	browserLaunch: RunTaskBrowserLaunchOptions;
-	persistence: RunTaskPersistenceCallbacks;
-	taskExecutionOverrides?: TaskExecutionOverridesIndex;
+  task: string;
+  taskNumber: number;
+  totalTasks: number;
+  taskRuns: number;
+  taskRunRetryCount: number;
+  taskUntilSuccessMaxAttempts?: number;
+  maxSteps: number;
+  workflowMaxParallelNodes?: number;
+  validatorLifecycle?: ValidatorLifecycleOptions;
+  stageLLMs: RunTaskStageLLMs;
+  requestAuthDomainCandidates?: RequestAuthDomainCandidates;
+  requestAuthIdentifierForDomain?: RequestAuthIdentifierForDomain;
+  requestAuthPasswordForDomain?: RequestAuthPasswordForDomain;
+  onUserActionRequired?: (input: {
+    kind: "browser_user_takeover";
+    reason: string;
+    category?: UserTakeoverCategory;
+  }) => Promise<void>;
+  onWorkflowPlanned?: OnRunTaskWorkflowPlanned;
+  browserLaunch: RunTaskBrowserLaunchOptions;
+  persistence: RunTaskPersistenceCallbacks;
+  taskExecutionOverrides?: TaskExecutionOverridesIndex;
 }
 
 export interface RunFailureRecord {
-	runIndex: number;
-	errors: string[];
-	kind: "runtime_exception" | "terminal_run_failure";
+  runIndex: number;
+  errors: string[];
+  kind: "runtime_exception" | "terminal_run_failure";
 }
 
 export interface RunTaskRunResult {
-	runIndex: number;
-	result: string | null;
-	completed: boolean;
-	successful: boolean;
-	validator: {
-		ran: boolean;
-		success: boolean;
-		summary: string;
-	};
+  runIndex: number;
+  result: string | null;
+  completed: boolean;
+  successful: boolean;
+  validator: {
+    ran: boolean;
+    success: boolean;
+    summary: string;
+  };
+  workflow?: WorkflowResult;
 }
 
 export interface RunTaskResult {
-	failedRuns: RunFailureRecord[];
-	runtimeFailedRuns: RunFailureRecord[];
-	terminalFailedRuns: RunFailureRecord[];
-	runs: RunTaskRunResult[];
+  failedRuns: RunFailureRecord[];
+  runtimeFailedRuns: RunFailureRecord[];
+  terminalFailedRuns: RunFailureRecord[];
+  runs: RunTaskRunResult[];
 }
 
 export interface RunAgentGenerateStepInput {
-	stepNumber: number;
-	messages: Message[];
-	llmOptions: LLMOptions;
-	promptPayload: Record<string, unknown>;
-	stepsHistory: StepHistoryEntry[];
-	caller?: string;
-	stepKind?: "executor_step" | "max_step_finalization";
-	abortSignal?: AbortSignal;
+  stepNumber: number;
+  messages: Message[];
+  llmOptions: LLMOptions;
+  promptPayload: Record<string, unknown>;
+  stepsHistory: StepHistoryEntry[];
+  caller?: string;
+  stepKind?: "executor_step" | "max_step_finalization";
+  abortSignal?: AbortSignal;
 }
 
 export type RunAgentGenerateStep = (
-	input: RunAgentGenerateStepInput,
+  input: RunAgentGenerateStepInput,
 ) => Promise<ChatJSONResult<ModelStepResult>>;
 
 export interface RunAgentInput {
-	session: CreateSessionInput;
-	task: string;
-	stageLLMs: RunTaskStageLLMs;
-	featureFlags: ConfigFeatureFlags;
-	initialPlanOverride?: string[];
-	autoSwitchToNewTab?: boolean;
-	requestAuthDomainCandidates?: RequestAuthDomainCandidates;
-	requestAuthIdentifierForDomain?: RequestAuthIdentifierForDomain;
-	requestAuthPasswordForDomain?: RequestAuthPasswordForDomain;
-	userActionBehavior?: "block" | "return" | "callback";
-	abortSignal?: AbortSignal;
-	recordModelInvocation?: (trace: StageModelInvocationTrace) => void;
-	onUserActionRequired?: (input: {
-		kind: "browser_user_takeover";
-		reason: string;
-		category?: UserTakeoverCategory;
-	}) => Promise<void>;
-	requestAgentTakeover?: (
-		input: BrowserAgentTakeoverRequest,
-	) => Promise<BrowserAgentTakeoverResult>;
-	onRunStarted?: (input: {
-		task: string;
-		session: CreateSessionInput;
-	}) => void | Promise<void>;
-	onBeforeSessionCreated?: (
-		input: CreateSessionInput,
-	) => void | Promise<void>;
-	onSessionCreated?: (input: CreateSessionResult) => void | Promise<void>;
-	onPreprocessedTask?: (input: {
-		preprocess: PreprocessTaskResult;
-		planningDom?: string;
-		preExecutionPrunerDom?: string;
-	}) => void | Promise<void>;
-	savePlanningDom?: (dom: string) => void | Promise<void>;
-	savePreExecutionPrunerDom?: (dom: string) => void | Promise<void>;
-	onStepGenerated?: (input: {
-		stepNumber: number;
-		step: ModelStepResult;
-		usage: TokenUsage;
-	}) => void | Promise<void>;
-	onStepCompleted?: (input: {
-		stepNumber: number;
-		step: ModelStepResult;
-		usage: TokenUsage;
-		browse?: BrowseResult;
-		promptContext?: {
-			current_url?: string;
-			current_tab?: number;
-			open_tabs?: string[];
-			downloaded_files?: string[];
-		};
-	}) => void | Promise<void>;
-	maxSteps?: number;
-	validatorLifecycle?: ValidatorLifecycleOptions;
-	keepSessionOpen?: boolean;
-	saveStepsContext?: boolean;
-	artifactDirectories?: Partial<BrowserAgentArtifactDirectories>;
-	includeStepArtifactsInResult?: boolean;
-	generateStep?: RunAgentGenerateStep;
+  session: CreateSessionInput;
+  task: string;
+  stageLLMs: RunTaskStageLLMs;
+  featureFlags: ConfigFeatureFlags;
+  initialPlanOverride?: string[];
+  autoSwitchToNewTab?: boolean;
+  requestAuthDomainCandidates?: RequestAuthDomainCandidates;
+  requestAuthIdentifierForDomain?: RequestAuthIdentifierForDomain;
+  requestAuthPasswordForDomain?: RequestAuthPasswordForDomain;
+  userActionBehavior?: "block" | "return" | "callback";
+  abortSignal?: AbortSignal;
+  recordModelInvocation?: (trace: StageModelInvocationTrace) => void;
+  onWorkflowPlanned?: OnWorkflowPlanned;
+  onUserActionRequired?: (input: {
+    kind: "browser_user_takeover";
+    reason: string;
+    category?: UserTakeoverCategory;
+  }) => Promise<void>;
+  requestAgentTakeover?: (
+    input: BrowserAgentTakeoverRequest,
+  ) => Promise<BrowserAgentTakeoverResult>;
+  onRunStarted?: (input: {
+    task: string;
+    session: CreateSessionInput;
+  }) => void | Promise<void>;
+  onBeforeSessionCreated?: (input: CreateSessionInput) => void | Promise<void>;
+  onSessionCreated?: (input: CreateSessionResult) => void | Promise<void>;
+  onPreprocessedTask?: (input: {
+    preprocess: PreprocessTaskResult;
+    planningDom?: string;
+    preExecutionPrunerDom?: string;
+  }) => void | Promise<void>;
+  savePlanningDom?: (dom: string) => void | Promise<void>;
+  savePreExecutionPrunerDom?: (dom: string) => void | Promise<void>;
+  onStepGenerated?: (input: {
+    stepNumber: number;
+    step: ModelStepResult;
+    usage: TokenUsage;
+  }) => void | Promise<void>;
+  onStepCompleted?: (input: {
+    stepNumber: number;
+    step: ModelStepResult;
+    usage: TokenUsage;
+    browse?: BrowseResult;
+    promptContext?: {
+      current_url?: string;
+      current_tab?: number;
+      open_tabs?: string[];
+      downloaded_files?: string[];
+    };
+  }) => void | Promise<void>;
+  maxSteps?: number;
+  validatorLifecycle?: ValidatorLifecycleOptions;
+  keepSessionOpen?: boolean;
+  saveStepsContext?: boolean;
+  artifactDirectories?: Partial<BrowserAgentArtifactDirectories>;
+  includeStepArtifactsInResult?: boolean;
+  generateStep?: RunAgentGenerateStep;
 }
 
+export type BorrowedRunAgentInput = Omit<
+  RunAgentInput,
+  "session" | "keepSessionOpen" | "abortSignal"
+> & {
+  sessionInput: CreateSessionInput;
+  authenticationPolicy: WorkflowAuthenticationPolicy;
+  abortSignal?: AbortSignal;
+  /** Close only the node's scoped CDP client and temporary state. Defaults to true. */
+  cleanupSession?: boolean;
+};
+
 export interface RunAgentStepTrace {
-	step: number;
-	model: ModelStepResult;
-	usage: TokenUsage;
-	browse?: BrowseResult;
+  step: number;
+  model: ModelStepResult;
+  usage: TokenUsage;
+  browse?: BrowseResult;
 }
 
 export interface RunAgentTokenTotals {
-	input_tokens: number;
-	cached_input_tokens: number;
-	output_tokens: number;
-	total_tokens: number;
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
 }
 
 export interface RunAgentStepArtifact {
-	stepNumber: number;
-	simplifiedDomYaml: string;
-	contextJson: Array<{
-		role: string;
-		content: unknown;
-	}>;
+  stepNumber: number;
+  simplifiedDomYaml: string;
+  contextJson: Array<{
+    role: string;
+    content: unknown;
+  }>;
 }
 
 export interface StepRuntimeMetrics {
-	stepNumber: number;
-	totalDurationMs: number;
-	tokenGenerationMs: number;
-	browserInteractionMs: number;
+  stepNumber: number;
+  totalDurationMs: number;
+  tokenGenerationMs: number;
+  browserInteractionMs: number;
 }
 
 export interface RunAgentResult {
-	preprocess: PreprocessTaskResult;
-	completed: boolean;
-	successful: boolean;
-	result: string | null;
-	steps: RunAgentStepTrace[];
-	stepsHistory: StepHistoryEntry[];
-	mainLoopEntries: MainLoopStepEntry[];
-	stepTokenUsage: StepTokenUsage[];
-	stepRuntimeMetrics: StepRuntimeMetrics[];
-	stepArtifacts?: RunAgentStepArtifact[];
-	tokenTotals: RunAgentTokenTotals;
-	successVerification?: import("../agents/types.js").SuccessVerificationResult;
-	userActionRequired?: {
-		kind: "browser_user_takeover";
-		reason: string;
-		category?: UserTakeoverCategory;
-	};
+  preprocess: PreprocessTaskResult;
+  completed: boolean;
+  successful: boolean;
+  result: string | null;
+  steps: RunAgentStepTrace[];
+  stepsHistory: StepHistoryEntry[];
+  mainLoopEntries: MainLoopStepEntry[];
+  stepTokenUsage: StepTokenUsage[];
+  stepRuntimeMetrics: StepRuntimeMetrics[];
+  stepArtifacts?: RunAgentStepArtifact[];
+  tokenTotals: RunAgentTokenTotals;
+  successVerification?: import("../agents/types.js").SuccessVerificationResult;
+  userActionRequired?: {
+    kind: "browser_user_takeover";
+    reason: string;
+    category?: UserTakeoverCategory;
+  };
+  workflow?: WorkflowResult;
 }
 
 export interface TrainingRolloutGenerateStepResult extends ChatJSONResult<ModelStepResult> {
-	rawModelOutputText: string;
-	promptTokenIds?: number[];
-	completionTokenIds?: number[];
-	studentLogprobs?: number[];
-	teacherPromptMessages?: unknown[];
-	providerMetadata?: unknown;
+  rawModelOutputText: string;
+  promptTokenIds?: number[];
+  completionTokenIds?: number[];
+  studentLogprobs?: number[];
+  teacherPromptMessages?: unknown[];
+  providerMetadata?: unknown;
 }
 
 export interface TrainingRolloutStep {
-	stepNumber: number;
-	stepKind: "executor_step" | "max_step_finalization";
-	promptMessages: Message[];
-	promptPayload: Record<string, unknown>;
-	rawModelOutputText: string;
-	generatedStep: ModelStepResult;
-	normalizedStep: ModelStepResult;
-	reasoningTokens: string;
-	tokenUsage: TokenUsage;
-	promptTokenIds: number[];
-	completionTokenIds: number[];
-	studentLogprobs: number[];
-	teacherPromptMessages?: unknown[];
-	providerMetadata?: unknown;
-	browse?: BrowseResult;
-	promptContext?: {
-		current_url?: string;
-		current_tab?: number;
-		open_tabs?: string[];
-		downloaded_files?: string[];
-	};
-	terminal?: {
-		completed: boolean;
-		successful: boolean;
-		successVerification?: import("../agents/types.js").SuccessVerificationResult;
-		userActionRequired?: RunAgentResult["userActionRequired"];
-	};
+  stepNumber: number;
+  stepKind: "executor_step" | "max_step_finalization";
+  promptMessages: Message[];
+  promptPayload: Record<string, unknown>;
+  rawModelOutputText: string;
+  generatedStep: ModelStepResult;
+  normalizedStep: ModelStepResult;
+  reasoningTokens: string;
+  tokenUsage: TokenUsage;
+  promptTokenIds: number[];
+  completionTokenIds: number[];
+  studentLogprobs: number[];
+  teacherPromptMessages?: unknown[];
+  providerMetadata?: unknown;
+  browse?: BrowseResult;
+  promptContext?: {
+    current_url?: string;
+    current_tab?: number;
+    open_tabs?: string[];
+    downloaded_files?: string[];
+  };
+  terminal?: {
+    completed: boolean;
+    successful: boolean;
+    successVerification?: import("../agents/types.js").SuccessVerificationResult;
+    userActionRequired?: RunAgentResult["userActionRequired"];
+  };
 }
 
 export interface RunTrainingRolloutInput extends Omit<
-	RunAgentInput,
-	"generateStep"
+  RunAgentInput,
+  "generateStep"
 > {
-	generateStep: (
-		input: RunAgentGenerateStepInput,
-	) => Promise<TrainingRolloutGenerateStepResult>;
+  generateStep: (
+    input: RunAgentGenerateStepInput,
+  ) => Promise<TrainingRolloutGenerateStepResult>;
 }
 
 export interface RunTrainingRolloutResult {
-	run: RunAgentResult;
-	steps: TrainingRolloutStep[];
+  run: RunAgentResult;
+  steps: TrainingRolloutStep[];
 }

@@ -57,6 +57,8 @@ import {
 	waitForUserTakeoverSignal,
 } from "./user-takeover.js";
 import { formatTabTitle } from "./step-context.js";
+import { LateWorkflowAuthenticationError } from "../../auth/runtime.js";
+import type { WorkflowAuthenticationPolicy } from "../../core/workflow-types.js";
 
 export interface StepPartTimingEntry {
 	part: string;
@@ -419,6 +421,8 @@ export async function executeActions(params: {
 	attemptAutomatedAuthTakeover?: (input: {
 		stepBaseIndex?: number;
 	}) => Promise<{ handled: boolean } & Record<string, unknown>>;
+	authenticationPolicy?: WorkflowAuthenticationPolicy;
+	abortSignal?: AbortSignal;
 	waitForAutomationPermission?: () => Promise<void>;
 	stepTimings?: StepPartTimingEntry[];
 	timingEnabled?: boolean;
@@ -450,6 +454,7 @@ export async function executeActions(params: {
 	const screenshotToolObservations: ScreenshotToolObservation[] = [];
 	const screenshotToolCaptures: ScreenshotToolCaptureCall[] = [];
 	const authTakeoverAttempts: AuthTakeoverAttemptEvent[] = [];
+	let authenticationOutcome: "handled" | "unhandled" | undefined;
 	const extractDataMemoryFile =
 		params.extractDataMemoryFile ?? params.memoryFile;
 	const dataExtractionCoordinator =
@@ -751,6 +756,12 @@ export async function executeActions(params: {
 						category: action.category,
 						reason: normalizedReason,
 					});
+					if (
+						normalizedCategory === "authentication" &&
+						params.authenticationPolicy === "reject"
+					) {
+						throw new LateWorkflowAuthenticationError();
+					}
 					const canAttemptAutomatedAuth =
 						configFeatureFlags.authTakeover &&
 						normalizedCategory === "authentication";
@@ -795,12 +806,14 @@ export async function executeActions(params: {
 						}
 
 						if (automatedResult?.handled) {
+							authenticationOutcome = "handled";
 							console.log(
 								`    -> automated auth takeover handled request; suppressing user_takeover`,
 							);
 							break;
 						}
 						if (!configFeatureFlags.userTakeoverTool) {
+							authenticationOutcome = "unhandled";
 							console.log(
 								`    -> automated auth takeover did not handle request; manual takeover disabled`,
 							);
@@ -813,6 +826,7 @@ export async function executeActions(params: {
 							`    -> automated auth takeover did not handle request; surfacing user_takeover`,
 						);
 					} else if (!configFeatureFlags.userTakeoverTool) {
+						authenticationOutcome = "unhandled";
 						console.log(
 							`    -> user_takeover tool call ignored (automatic auth unavailable)`,
 						);
@@ -822,9 +836,17 @@ export async function executeActions(params: {
 						break;
 					}
 					if (params.userActionBehavior === "return") {
+						authenticationOutcome =
+							normalizedCategory === "authentication"
+								? "unhandled"
+								: authenticationOutcome;
 						userTakeoverReason = normalizedReason;
 						userTakeoverCategory = normalizedCategory;
 					} else if (params.userActionBehavior === "callback") {
+						authenticationOutcome =
+							normalizedCategory === "authentication"
+								? "unhandled"
+								: authenticationOutcome;
 						await params.onUserActionRequired?.({
 							kind: "browser_user_takeover",
 							reason: normalizedReason,
@@ -839,7 +861,11 @@ export async function executeActions(params: {
 						await waitForUserTakeoverSignal({
 							browser: params.b,
 							reason: normalizedReason,
+							abortSignal: params.abortSignal,
 						});
+						if (normalizedCategory === "authentication") {
+							authenticationOutcome = "handled";
+						}
 					}
 					pendingUserTakeover = true;
 					break;
@@ -1104,6 +1130,9 @@ export async function executeActions(params: {
 					break;
 			}
 		} catch (e: unknown) {
+			if (e instanceof LateWorkflowAuthenticationError) {
+				throw e;
+			}
 			const message = e instanceof Error ? e.message : String(e);
 			console.log(`    -> ERROR: ${message}`);
 			if (action.type === "click") {
@@ -1229,6 +1258,7 @@ export async function executeActions(params: {
 		screenshotToolObservations,
 		screenshotToolCaptures,
 		authTakeoverAttempts,
+		authenticationOutcome,
 		userTakeover: userTakeoverReason
 			? {
 					reason: userTakeoverReason,

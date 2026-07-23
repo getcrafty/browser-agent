@@ -313,6 +313,7 @@ export async function connectToTarget(input: {
 	userDataDir?: string;
 	closeTransport?: () => Promise<void>;
 	onActivateTarget?: (targetId: string) => Promise<void>;
+	targetScope?: Browser["targetScope"];
 }): Promise<Browser> {
 	const client = await CDP(
 		withLocalCdpHost({
@@ -339,6 +340,7 @@ export async function connectToTarget(input: {
 		userDataDir: input.userDataDir,
 		closeTransport: input.closeTransport,
 		onActivateTarget: input.onActivateTarget,
+		targetScope: input.targetScope,
 	};
 	await installPrintInterception(browser);
 

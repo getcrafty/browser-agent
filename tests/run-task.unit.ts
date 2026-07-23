@@ -57,6 +57,53 @@ describe("runTask retry loop", () => {
 		});
 	});
 
+	it("preserves workflow node diagnostics for trajectory serialization", () => {
+		const result = buildRunTaskRunResult(1, {
+			result: null,
+			completed: false,
+			successful: false,
+			workflow: {
+				decision: {
+					mode: "workflow",
+					reason: "Parallel work",
+					nodes: [
+						{
+							id: "research",
+							kind: "task",
+							task: "Research",
+							dependsOn: [],
+						},
+					],
+				},
+				nodes: [
+					{
+						nodeId: "research",
+						kind: "task",
+						status: "failed",
+						error: "Workflow node execution failed.",
+						diagnostic: {
+							phase: "successor_handoff",
+							code: "scope_missing",
+							sourceScopeId: "wf-n0",
+							destinationScopeId: "wf-e0-1",
+						},
+					},
+				],
+				result: null,
+				completed: false,
+				successful: false,
+			},
+		} as RunAgentResult);
+
+		assert.deepEqual(result.workflow?.nodes[0]?.diagnostic, {
+			phase: "successor_handoff",
+			code: "scope_missing",
+			sourceScopeId: "wf-n0",
+			destinationScopeId: "wf-e0-1",
+		});
+		assert.include(JSON.stringify(result), '"diagnostic"');
+	});
+
 	it("marks validation as not run for incomplete runs", () => {
 		const result = buildRunTaskRunResult(1, {
 			result: null,
@@ -259,7 +306,13 @@ describe("runTask retry loop", () => {
 			completed: true,
 			successful: true,
 			mainLoopEntries: [
-				{ step: 1, step_kind: "executor_step", messages: [] },
+				{
+					step: 1,
+					step_kind: "executor_step",
+					messages: [],
+					workflow_node_id: "research_a",
+					workflow_node_kind: "task",
+				},
 				{ step: 2, step_kind: "auth_takeover_attempt", messages: [] },
 				{ step: 3, step_kind: "executor_step", messages: [] },
 			],
@@ -299,16 +352,18 @@ describe("runTask retry loop", () => {
 				stage: invocation.stage,
 				step: invocation.step,
 				stepKind: invocation.stepKind,
+				workflowNodeId: invocation.workflowNodeId,
+				workflowNodeKind: invocation.workflowNodeKind,
 			})),
 			[
-				{ sequence: 1, stage: "findTargetURL", step: undefined, stepKind: undefined },
-				{ sequence: 2, stage: "runAgent", step: 1, stepKind: "executor_step" },
-				{ sequence: 3, stage: "authTakeover", step: 2, stepKind: "auth_takeover_attempt" },
-				{ sequence: 4, stage: "runAgent", step: 3, stepKind: "executor_step" },
-				{ sequence: 5, stage: "dataExtraction", step: 3, stepKind: undefined },
-				{ sequence: 6, stage: "createPlan", step: 3, stepKind: undefined },
-				{ sequence: 7, stage: "futureStage", step: undefined, stepKind: undefined },
-				{ sequence: 8, stage: "verifySuccess", step: undefined, stepKind: undefined },
+				{ sequence: 1, stage: "findTargetURL", step: undefined, stepKind: undefined, workflowNodeId: undefined, workflowNodeKind: undefined },
+				{ sequence: 2, stage: "runAgent", step: 1, stepKind: "executor_step", workflowNodeId: "research_a", workflowNodeKind: "task" },
+				{ sequence: 3, stage: "authTakeover", step: 2, stepKind: "auth_takeover_attempt", workflowNodeId: undefined, workflowNodeKind: undefined },
+				{ sequence: 4, stage: "runAgent", step: 3, stepKind: "executor_step", workflowNodeId: undefined, workflowNodeKind: undefined },
+				{ sequence: 5, stage: "dataExtraction", step: 3, stepKind: undefined, workflowNodeId: undefined, workflowNodeKind: undefined },
+				{ sequence: 6, stage: "createPlan", step: 3, stepKind: undefined, workflowNodeId: undefined, workflowNodeKind: undefined },
+				{ sequence: 7, stage: "futureStage", step: undefined, stepKind: undefined, workflowNodeId: undefined, workflowNodeKind: undefined },
+				{ sequence: 8, stage: "verifySuccess", step: undefined, stepKind: undefined, workflowNodeId: undefined, workflowNodeKind: undefined },
 			],
 		);
 		assert.deepEqual(result.totals, {
@@ -341,7 +396,7 @@ describe("runTask retry loop", () => {
 			sleepFn: async (ms) => {
 				sleepCalls.push(ms);
 			},
-			executeRun: async (runIndex, attemptOrdinal) => {
+				executeRun: async (runIndex, attemptOrdinal) => {
 				attempts.push({ runIndex, attemptOrdinal });
 				if (runIndex === 1) {
 					throw new Error(
