@@ -17,6 +17,7 @@ export * from "./session.js";
 export * from "./preprocess-task.js";
 export * from "./step.js";
 export * from "./process-model-step-output.js";
+export * from "./checklist-state.js";
 export * from "./run-task.js";
 export * from "./run-agent.js";
 export * from "./run-workflow.js";

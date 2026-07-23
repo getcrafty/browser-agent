@@ -62,6 +62,7 @@ export interface PreprocessStageLLMs {
   findTargetURL: LLMOptions;
   dismissCookieBanner: LLMOptions;
   createPlan: LLMOptions;
+  createChecklist?: LLMOptions;
   preExecutionDomPruning: LLMOptions;
 }
 
@@ -74,6 +75,7 @@ export interface RunTaskStageLLMs extends PreprocessStageLLMs {
 export interface ValidatorLifecycleOptions {
   mode: "terminal" | "retry";
   maxFailures: number;
+  context?: "full" | "compact";
 }
 
 export interface ValidatorFeedback {
@@ -82,6 +84,8 @@ export interface ValidatorFeedback {
   summary: string;
   reasons: string[];
   instruction: string;
+  reopenChecklistItemIds?: string[];
+  addedChecklistItemIds?: string[];
 }
 
 export interface TokenUsageTotals {
@@ -193,6 +197,7 @@ export interface CoreDeps {
       activeWebsiteToolGuidance?: import("../website-tools.js").WebsiteToolActiveGuidance;
     },
   ) => Promise<Plan>;
+  createChecklist: typeof import("../agents/checklist.js").createChecklist;
   choosePreExecutionDomNonClickableIdsToExclude: typeof choosePreExecutionDomNonClickableIdsToExclude;
   pruneLiveDomByIdentifiers: typeof pruneLiveDomByIdentifiers;
   buildStepPayload: typeof buildStepPayload;
@@ -284,6 +289,7 @@ export interface PreprocessTaskResult {
   target_url: string;
   final_url: string;
   plan: string[];
+  checklist: import("../agents/types.js").ChecklistItem[];
   dom_pruning: {
     thinking: string;
     excluded_non_clickable_ids: string[];
@@ -392,6 +398,9 @@ export interface ProcessModelStepOutputInput {
   keepPlanInHistory?: boolean;
   planLength?: number;
   sessionPlanStatuses?: Array<"DONE" | "TODO" | "REGRESSED">;
+  sessionChecklist?: import("../agents/types.js").ChecklistItem[];
+  verificationPurpose?: "terminal_judge" | "completion_verifier";
+  validatorContext?: "full" | "compact";
   allowModelResultCompletion?: boolean;
   allowFatalActionErrors?: boolean;
   autoSwitchToNewTab?: boolean;

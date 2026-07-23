@@ -37,12 +37,14 @@ export function createMockCoreDeps(
 ): CoreDeps {
 	const registry = overrides.registry ?? new SessionRegistry();
 	const featureFlags: ConfigFeatureFlags = {
+		taskChecklist: false,
 		preStepScreenshotInLatestUserPrompt: false,
 		userTakeoverTool: true,
 		authTakeover: false,
 		agentTakeoverTool: false,
 		dismissCookieBanner: true,
 		preExecutionDomPruning: true,
+		extractDataWholeContext: false,
 		websiteAPIficationTools: false,
 		optimizeExecutorStepDelays: false,
 		optimizeTextInput: false,
@@ -79,6 +81,9 @@ export function createMockCoreDeps(
 		dismissCookieBanner: async () => undefined,
 		createPlan: async (): Promise<Plan> => ({
 			steps: ["Open search", "Check results"],
+		}),
+		createChecklist: async () => ({
+			items: ["Complete every explicit task requirement."],
 		}),
 		choosePreExecutionDomNonClickableIdsToExclude: async () => ({
 			thinking: "remove noise",

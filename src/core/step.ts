@@ -46,6 +46,11 @@ import { shouldLogTimingDuration } from "../timing-logs.js";
 import { featureFlags } from "../featureFlags.js";
 import { shouldIncludeExecutorReasoningHistory } from "../agents/prompts.js";
 import { resolveIncrementalHtmlContext } from "./html-diff.js";
+import {
+	applyChecklistUpdate,
+	formatChecklistForPrompt,
+	normalizeChecklistUpdate,
+} from "./checklist-state.js";
 
 const PRE_STEP_SCREENSHOT_STALE_NODE_RETRY_COUNT = 2;
 const PRE_STEP_SCREENSHOT_STALE_NODE_RETRY_DELAY_MS = 150;
@@ -430,7 +435,7 @@ async function createPromptForStepImpl(
 	});
 	const protectAuthContext = shouldProtectAuthContext(session);
 	const domOptions = {
-		includeNonClickableIds: true,
+		includeNonClickableIds: !configFeatureFlags.extractDataWholeContext,
 		...(featureFlags.removeHrefsFromInputContext
 			? { omitHrefs: true }
 			: {}),
@@ -788,6 +793,9 @@ async function createPromptForStepImpl(
 					activePlan,
 					session.planStatuses,
 				),
+				checklistForPayload: formatChecklistForPrompt(
+					session.activeChecklist,
+				),
 				url: currentUrl,
 				previousInteractionErrors: promptInteractionErrors,
 				previousToolObservations: session.previousToolObservations,
@@ -1007,7 +1015,7 @@ export async function browse(
 	}
 	const protectAuthContext = shouldProtectAuthContext(session);
 	const domOptions = {
-		includeNonClickableIds: true,
+		includeNonClickableIds: !configFeatureFlags.extractDataWholeContext,
 		...(featureFlags.removeHrefsFromInputContext
 			? { omitHrefs: true }
 			: {}),
@@ -1314,6 +1322,14 @@ export async function processStepModelOutput(
 	if (normalizedPlanUpdates.length > 0 && input.sessionPlanStatuses) {
 		applyPlanStepUpdates(input.sessionPlanStatuses, normalizedPlanUpdates);
 	}
+	const normalizedChecklistUpdate = normalizeChecklistUpdate(
+		step.checklistUpdate,
+		input.sessionChecklist ?? [],
+	);
+	step.checklistUpdate = normalizedChecklistUpdate;
+	if (input.sessionChecklist) {
+		applyChecklistUpdate(input.sessionChecklist, normalizedChecklistUpdate);
+	}
 	if (input.allowModelResultCompletion === false && step.done) {
 		step.done = false;
 		delete step.result;
@@ -1356,6 +1372,9 @@ export async function processStepModelOutput(
 							: undefined,
 					finalStep: step,
 					finalPromptPayload: input.promptPayload,
+					checklist: input.sessionChecklist,
+					purpose: input.verificationPurpose,
+					contextMode: input.validatorContext,
 					historyMessages: priorHistoryMessages,
 					llmOptions: deps.defaultSuccessVerifierLLMOptions,
 					caller: "processStepModelOutput:verifySuccess",
@@ -1442,6 +1461,9 @@ export async function processModelOutputAndBrowse(
 							: undefined,
 					finalStep: preprocessResult.step,
 					finalPromptPayload: input.promptPayload,
+					checklist: input.sessionChecklist,
+					purpose: input.verificationPurpose,
+					contextMode: input.validatorContext,
 					historyMessages: buildHistoryMessagesFromFullStepHistory(
 						input.stepsHistory,
 					),

@@ -1,6 +1,7 @@
 import type { Action, ExecutorResultItem } from "../types.js";
 import { isUserTakeoverCategory } from "../../user-action-types.js";
 import type { WebsiteToolInputs } from "../../website-tools.js";
+import { configFeatureFlags } from "../../config-feature-flags.js";
 
 export interface NormalizeActionListResult {
 	actions: Action[];
@@ -194,6 +195,9 @@ function normalizeExtractDataRecord(
 	) {
 		return null;
 	}
+	if (obj.root === undefined && configFeatureFlags.extractDataWholeContext) {
+		return { type: "extract_data" };
+	}
 	if (typeof obj.root !== "string") return null;
 	return normalizeExtractDataRoot(obj.root);
 }
@@ -264,6 +268,12 @@ export function normalizeShorthandActionEntry(entry: unknown): Action | null {
 		if (keyword === "unprune") return { type: "unprune" };
 		if (keyword === "download_current_file") {
 			return { type: "download_current_file" };
+		}
+		if (
+			keyword === "extract_data" &&
+			configFeatureFlags.extractDataWholeContext
+		) {
+			return { type: "extract_data" };
 		}
 		if (keyword === "regenerate_plan") return { type: "regenerate_plan" };
 		return null;

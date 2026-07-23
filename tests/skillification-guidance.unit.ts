@@ -15,6 +15,10 @@ describe("skillification guidance", () => {
 		const payload = {
 			task: "Find a current price.",
 			plan: ["[TODO] open result"],
+			checklist: [
+				"[DONE] C1 Return the current price.",
+				"[TODO] C2 Include the currency.",
+			],
 			currentURL: "https://example.com/search?q=item",
 			html: "<main>large dom</main>",
 			validBids: ["a"],
@@ -52,6 +56,12 @@ describe("skillification guidance", () => {
 					stage: "createPlan",
 					output: { steps: ["Open example", "Read value"] },
 				},
+				{
+					stage: "createChecklist",
+					output: {
+						items: ["Return the current price.", "Include the currency."],
+					},
+				},
 			],
 			steps: [
 				{
@@ -86,6 +96,11 @@ describe("skillification guidance", () => {
 		assert.strictEqual(artifact.sourceStepCount, 1);
 		assert.strictEqual(artifact.sourceTargetUrl, "https://example.com");
 		assert.deepEqual(artifact.originalPlan, ["Open example", "Read value"]);
+		assert.deepEqual(artifact.originalChecklist, [
+			"Return the current price.",
+			"Include the currency.",
+		]);
+		assert.deepEqual(artifact.finalChecklist, payload.checklist);
 		assert.deepEqual(artifact.urlSequence, [
 			"https://example.com/search?q=item",
 		]);

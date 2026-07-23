@@ -119,7 +119,9 @@ export function buildRecapStageUsage(
   for (const trace of modelInvocations) {
     if (
       PREPROCESS_RECAP_STAGES.has(trace.stage) ||
-      (trace.stage === "createPlan" && trace.meta?.phase === "initial_plan")
+      (trace.stage === "createPlan" && trace.meta?.phase === "initial_plan") ||
+      (trace.stage === "createChecklist" &&
+        trace.meta?.phase === "initial_checklist")
     ) {
       stageUsage.push({
         phase: "preprocess",

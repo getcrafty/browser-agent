@@ -33,6 +33,9 @@ export function resolvePreprocessStageLLMsFromEnv(
 			stageLLMs.dismissCookieBanner,
 		),
 		createPlan: resolveLLMOptionsFromEnv(stageLLMs.createPlan),
+		createChecklist: resolveLLMOptionsFromEnv(
+			stageLLMs.createChecklist ?? stageLLMs.createPlan,
+		),
 		preExecutionDomPruning: resolveLLMOptionsFromEnv(
 			stageLLMs.preExecutionDomPruning,
 		),
@@ -51,6 +54,9 @@ export function resolveStageLLMsFromEnv(
 			stageLLMs.dismissCookieBanner,
 		),
 		createPlan: resolveLLMOptionsFromEnv(stageLLMs.createPlan),
+		createChecklist: resolveLLMOptionsFromEnv(
+			stageLLMs.createChecklist ?? stageLLMs.createPlan,
+		),
 		preExecutionDomPruning: resolveLLMOptionsFromEnv(
 			stageLLMs.preExecutionDomPruning,
 		),

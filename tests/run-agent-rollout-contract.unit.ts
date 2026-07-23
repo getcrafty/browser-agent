@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, it } from "mocha";
 import { createMockCoreDeps } from "./helpers/core-deps-fixtures.js";
 import { runTrainingRollout } from "../src/core/training-rollout.js";
 import { setRuntimeOptions } from "../src/runtime-options.js";
+import {
+	configFeatureFlags,
+	setConfigFeatureFlags,
+} from "../src/config-feature-flags.js";
 
 describe("runTrainingRollout", () => {
 	beforeEach(() => {
@@ -180,6 +184,7 @@ describe("runTrainingRollout", () => {
 			dataExtraction: { provider: "openai", model: "gpt-test" },
 			featureFlags: deps.featureFlags,
 			maxSteps: 2,
+			validatorLifecycle: { mode: "terminal", maxFailures: 3 },
 			generateStep: async () => ({
 				data: {
 					thinking: "Return the result",
@@ -206,7 +211,7 @@ describe("runTrainingRollout", () => {
 		);
 	});
 
-	it("continues with bounded validator feedback and accepts a corrected result", async () => {
+	it("uses default retry verification and accepts a corrected result", async () => {
 		let resultCalls = 0;
 		let verificationCalls = 0;
 		let secondPromptPayload: Record<string, unknown> | undefined;
@@ -269,7 +274,6 @@ describe("runTrainingRollout", () => {
 			dataExtraction: { provider: "openai", model: "gpt-test" },
 			featureFlags: deps.featureFlags,
 			maxSteps: 3,
-			validatorLifecycle: { mode: "retry", maxFailures: 3 },
 			generateStep: async ({ stepNumber, promptPayload }) => {
 				if (stepNumber === 2) secondPromptPayload = promptPayload;
 				return {
@@ -306,6 +310,104 @@ describe("runTrainingRollout", () => {
 		assert.deepInclude(result.run.stepsHistory[1]?.payload, {
 			validatorFeedback: secondPromptPayload?.validatorFeedback,
 		});
+	});
+
+	it("reopens cumulative checklist items and forwards the configured verifier context", async () => {
+		const originalTaskChecklist = configFeatureFlags.taskChecklist;
+		setConfigFeatureFlags({ taskChecklist: true });
+		try {
+			let verificationCalls = 0;
+			const verificationInputs: Array<Record<string, unknown>> = [];
+			let secondChecklist: unknown;
+			const deps = createMockCoreDeps({
+				featureFlags: {
+					...createMockCoreDeps().featureFlags,
+					taskChecklist: true,
+				},
+				createChecklist: async () => ({
+					items: ["Return all matches.", "Include a date for each match."],
+				}),
+				executeActions: async () => ({
+					pendingMemoryRead: false,
+					interactionErrors: [],
+					pendingPlanRegeneration: false,
+					screenshotToolObservations: [],
+					screenshotToolCaptures: [],
+					returnedResult:
+						verificationCalls === 0 ? "Incomplete" : "Corrected",
+				}),
+				verifyTaskSuccess: async (input) => {
+					verificationInputs.push(input as unknown as Record<string, unknown>);
+					verificationCalls += 1;
+					return {
+						success: verificationCalls > 1,
+						summary:
+							verificationCalls === 1
+								? "C2 incomplete: add the missing date."
+								: "Task succeeded.",
+						reasons: [],
+						reopenChecklistItemIds:
+							verificationCalls === 1 ? ["C2"] : undefined,
+						addChecklistItems:
+							verificationCalls === 1
+								? ["Include a source link for every match."]
+								: undefined,
+						model: "gpt-test",
+						provider: "openai",
+						usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+					};
+				},
+			});
+
+			const result = await runTrainingRollout(deps, {
+				session: { port: 9389, headless: true, forceRestart: true },
+				task: "Return all matches with dates and links",
+				stageLLMs: {
+					findTargetURL: { provider: "openai", model: "gpt-test" },
+					dismissCookieBanner: { provider: "openai", model: "gpt-test" },
+					createPlan: { provider: "openai", model: "gpt-test" },
+					createChecklist: { provider: "openai", model: "gpt-test" },
+					preExecutionDomPruning: { provider: "openai", model: "gpt-test" },
+					runAgent: { provider: "openai", model: "gpt-test" },
+					verifySuccess: { provider: "openai", model: "gpt-test" },
+				},
+				dataExtraction: { provider: "openai", model: "gpt-test" },
+				featureFlags: deps.featureFlags,
+				maxSteps: 3,
+				validatorLifecycle: {
+					mode: "retry",
+					maxFailures: 3,
+					context: "compact",
+				},
+				generateStep: async ({ stepNumber, promptPayload }) => {
+					if (stepNumber === 2) secondChecklist = promptPayload.checklist;
+					return {
+						data: {
+							checklistUpdate:
+								stepNumber === 1
+									? { C1: "done", C2: "done" }
+									: { C2: "done", C3: "done" },
+							actions: [{ type: "return_results" }],
+							done: false,
+						},
+						usage: { input_tokens: 7, output_tokens: 2, total_tokens: 9 },
+						reasoning_tokens: "",
+						rawModelOutputText: `step ${stepNumber}`,
+					};
+				},
+			});
+
+			assert.isTrue(result.run.successful);
+			assert.deepEqual(secondChecklist, [
+				"[DONE] C1 Return all matches.",
+				"[TODO] C2 Include a date for each match.",
+				"[TODO] C3 Include a source link for every match.",
+			]);
+			assert.equal(verificationInputs[0].purpose, "completion_verifier");
+			assert.equal(verificationInputs[0].contextMode, "compact");
+		} finally {
+			setConfigFeatureFlags({ taskChecklist: originalTaskChecklist });
+		}
 	});
 
 	it("stops after the configured number of validator failures", async () => {

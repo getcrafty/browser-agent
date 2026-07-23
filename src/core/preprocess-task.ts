@@ -7,8 +7,14 @@ import { SessionNotFoundError } from "./session.js";
 import { type PlanProgressStatus } from "./run-agent-loop-state.js";
 import { shouldLogTimingDuration } from "../timing-logs.js";
 import { featureFlags } from "../featureFlags.js";
+import {
+	createChecklistItems,
+	normalizeChecklistDraft,
+} from "./checklist-state.js";
+import type { ChecklistItem } from "../agents/types.js";
 
 const CREATE_PLAN_MAX_ATTEMPTS = 2;
+const CREATE_CHECKLIST_MAX_ATTEMPTS = 2;
 
 function getSessionOrThrow(deps: CoreDeps, port: number) {
 	const session = deps.registry.get(port);
@@ -151,6 +157,50 @@ async function createPlanWithRetry(params: {
 	);
 }
 
+async function createChecklistWithRetry(params: {
+	deps: CoreDeps;
+	input: PreprocessTaskInput;
+}): Promise<ChecklistItem[]> {
+	let lastError: Error | null = null;
+	for (
+		let attempt = 1;
+		attempt <= CREATE_CHECKLIST_MAX_ATTEMPTS;
+		attempt++
+	) {
+		try {
+			const raw = await measureLoggedStage({
+				port: params.input.port,
+				stage: "createChecklist",
+				log: params.input.log,
+				run: async () =>
+					await params.deps.createChecklist(
+						params.input.userTask,
+						params.input.stageLLMs.createChecklist ??
+							params.input.stageLLMs.createPlan,
+						{
+							onTrace: params.input.recordModelInvocation,
+							meta: { checklistAttempt: attempt, phase: "initial_checklist" },
+						},
+					),
+			});
+			const normalized = normalizeChecklistDraft(raw);
+			if (normalized) return createChecklistItems(normalized.items);
+			lastError = new Error("expected YAML object with non-empty items: string[]");
+		} catch (error) {
+			lastError = error instanceof Error ? error : new Error(String(error));
+		}
+		if (attempt < CREATE_CHECKLIST_MAX_ATTEMPTS) {
+			console.warn(
+				`[preprocessTask] createChecklist attempt ${attempt} failed: ${lastError.message}. Retrying...`,
+			);
+		}
+	}
+	console.warn(
+		`[preprocessTask] createChecklist failed after ${CREATE_CHECKLIST_MAX_ATTEMPTS} attempts; using the original task as a fallback checklist item: ${lastError?.message ?? "unknown error"}`,
+	);
+	return createChecklistItems([params.input.userTask]);
+}
+
 export async function preprocessTask(
 	deps: CoreDeps,
 	input: PreprocessTaskInput,
@@ -226,11 +276,11 @@ export async function preprocessTask(
 	}
 	await input.savePlanningDom?.(planningDom);
 	const planningEnabled = featureFlags.enablePlanning;
-	const plan = !planningEnabled
-		? { steps: [] }
+	const planPromise = !planningEnabled
+		? Promise.resolve({ steps: [] })
 		: initialPlanOverride
-			? { steps: initialPlanOverride }
-			: await createPlanWithRetry({
+			? Promise.resolve({ steps: initialPlanOverride })
+			: createPlanWithRetry({
 					deps,
 					input,
 					dom: planningDom,
@@ -239,6 +289,16 @@ export async function preprocessTask(
 						typeof session.pinnedMemoryContent === "string",
 					preparedPasteFiles: session.preparedPasteFiles,
 				});
+	const checklistPromise = deps.featureFlags.taskChecklist
+		? createChecklistWithRetry({
+				deps,
+				input,
+			})
+		: Promise.resolve([] as ChecklistItem[]);
+	const [plan, checklist] = await Promise.all([
+		planPromise,
+		checklistPromise,
+	]);
 
 	const domPruning = createEmptyDomPruningResult();
 	if (deps.featureFlags.preExecutionDomPruning) {
@@ -287,6 +347,7 @@ export async function preprocessTask(
 	});
 
 	session.activePlan = [...plan.steps];
+	session.activeChecklist = checklist.map((item) => ({ ...item }));
 	session.planStatuses = plan.steps.map((): PlanProgressStatus => "TODO");
 	session.keepPlanInHistory = planningEnabled;
 	session.recentExecutions = [];
@@ -309,6 +370,7 @@ export async function preprocessTask(
 		target_url: targetURL,
 		final_url: finalUrl,
 		plan: plan.steps,
+		checklist: checklist.map((item) => ({ ...item })),
 		dom_pruning: domPruning,
 		context: {
 			current_url: finalUrl,

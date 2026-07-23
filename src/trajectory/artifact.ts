@@ -22,6 +22,8 @@ export interface CompactTrajectoryArtifact {
 	successVerification?: SuccessVerificationResult;
 	sourceTargetUrl?: string;
 	originalPlan?: string[];
+	originalChecklist?: string[];
+	finalChecklist?: string[];
 	urlSequence: string[];
 	steps: CompactTrajectoryStep[];
 }
@@ -68,6 +70,8 @@ export function buildCompactTrajectoryArtifact(
 				: undefined,
 		sourceTargetUrl: extractStageOutputUrl(source, "findTargetURL"),
 		originalPlan: extractOriginalPlan(source),
+		originalChecklist: extractOriginalChecklist(source),
+		finalChecklist: extractFinalChecklist(rawSteps),
 		urlSequence,
 		steps: compactSteps,
 	};
@@ -273,6 +277,50 @@ function extractOriginalPlan(
 					typeof step === "string" && step.trim() !== "",
 			)
 		: undefined;
+}
+
+function extractOriginalChecklist(
+	source: Record<string, unknown>,
+): string[] | undefined {
+	const invocations = Array.isArray(source.modelInvocations)
+		? source.modelInvocations
+		: [];
+	const invocation = invocations.find(
+		(candidate) =>
+			candidate &&
+			typeof candidate === "object" &&
+			(candidate as { stage?: unknown }).stage === "createChecklist",
+	);
+	if (!invocation || typeof invocation !== "object") return undefined;
+	const output = (invocation as { output?: unknown }).output;
+	if (!output || typeof output !== "object" || Array.isArray(output)) {
+		return undefined;
+	}
+	const items = (output as { items?: unknown }).items;
+	return Array.isArray(items)
+		? items.filter(
+				(item): item is string =>
+					typeof item === "string" && item.trim().length > 0,
+			)
+		: undefined;
+}
+
+function extractFinalChecklist(rawSteps: unknown[]): string[] | undefined {
+	for (let index = rawSteps.length - 1; index >= 0; index--) {
+		const source =
+			rawSteps[index] &&
+			typeof rawSteps[index] === "object" &&
+			!Array.isArray(rawSteps[index])
+				? (rawSteps[index] as Record<string, unknown>)
+				: {};
+		const payload = parseStepPromptPayload(source.messages);
+		if (!Array.isArray(payload?.checklist)) continue;
+		const checklist = payload.checklist.filter(
+			(item): item is string => typeof item === "string",
+		);
+		if (checklist.length > 0) return checklist;
+	}
+	return undefined;
 }
 
 function dedupeConsecutive(values: string[]): string[] {

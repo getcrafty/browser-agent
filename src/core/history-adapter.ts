@@ -28,7 +28,8 @@ function isStepLikeRecord(value: unknown): value is Record<string, unknown> {
 		Object.prototype.hasOwnProperty.call(obj, "actions") ||
 		Object.prototype.hasOwnProperty.call(obj, "done") ||
 		Object.prototype.hasOwnProperty.call(obj, "result") ||
-		Object.prototype.hasOwnProperty.call(obj, "previousStepPlanUpdate")
+		Object.prototype.hasOwnProperty.call(obj, "previousStepPlanUpdate") ||
+		Object.prototype.hasOwnProperty.call(obj, "checklistUpdate")
 	);
 }
 
@@ -65,6 +66,7 @@ function toCanonicalAssistantContent(assistant: unknown): string {
 	const step: StepResult = {
 		thinking: "",
 		previousStepPlanUpdate: [],
+		checklistUpdate: undefined,
 		previousStepStatus: normalizePreviousStepStatus(
 			obj.previousStepStatus ?? actionContext?.status,
 		),
@@ -85,6 +87,13 @@ function toCanonicalAssistantContent(assistant: unknown): string {
 
 	if (Array.isArray(obj.previousStepPlanUpdate)) {
 		step.previousStepPlanUpdate = obj.previousStepPlanUpdate as any;
+	}
+	if (
+		obj.checklistUpdate &&
+		typeof obj.checklistUpdate === "object" &&
+		!Array.isArray(obj.checklistUpdate)
+	) {
+		step.checklistUpdate = obj.checklistUpdate as any;
 	}
 	if (typeof obj.result === "string") {
 		step.result = obj.result;

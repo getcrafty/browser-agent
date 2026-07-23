@@ -17,11 +17,24 @@ import {
 describe("executor memory prompt", () => {
 	const originalWebsiteAPIficationTools =
 		configFeatureFlags.websiteAPIficationTools;
+	const originalExtractDataWholeContext =
+		configFeatureFlags.extractDataWholeContext;
 
 	afterEach(() => {
 		setConfigFeatureFlags({
 			websiteAPIficationTools: originalWebsiteAPIficationTools,
+			extractDataWholeContext: originalExtractDataWholeContext,
 		});
+	});
+
+	it("documents rootless whole-document extraction independently", () => {
+		setConfigFeatureFlags({ extractDataWholeContext: true });
+		const prompt = getExecutorSystemBase();
+
+		assert.include(prompt, "Use the bare extract_data tool name");
+		assert.include(prompt, "entire current simplified DOM");
+		assert.notInclude(prompt, 'extract_data: "!a"');
+		assert.notInclude(prompt, "one existing bid or ncid handle");
 	});
 
 	it("documents memory_read for preloaded context and mutable scratchpad behavior", () => {

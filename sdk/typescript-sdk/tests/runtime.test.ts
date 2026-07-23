@@ -36,6 +36,11 @@ test("creates private files and preserves caller-owned directories", async () =>
 		const config = JSON.parse(fs.readFileSync(files.configPath, "utf8"));
 		assert.equal(config.executable_path, path.resolve("chrome"));
 		assert.equal(config.endpoint_url, "https://example.com/v1");
+		assert.deepEqual(config.validator_lifecycle, {
+			mode: "retry",
+			max_failures: 3,
+			context: "full",
+		});
 		await files.cleanup();
 		assert.equal(fs.existsSync(runtimeDirectory), false);
 		assert.equal(fs.existsSync(workspace), true);

@@ -1007,7 +1007,19 @@ export async function executeActions(params: {
 					returnedResult = extractMemoryResults(extractedResult);
 					break;
 				case "extract_data": {
-					const regionDescription = `root=${action.root}`;
+					const wholeDocument =
+						configFeatureFlags.extractDataWholeContext;
+					const extractionRoot = wholeDocument
+						? "whole_document"
+						: action.root;
+					if (!extractionRoot) {
+						throw new Error(
+							"extract_data requires a root unless whole-context extraction is enabled",
+						);
+					}
+					const regionDescription = wholeDocument
+						? "scope=whole_document"
+						: `root=${extractionRoot}`;
 					console.log(`    -> extract_data(${regionDescription})`);
 					const extractor =
 						params.extractDataResultsFromSnapshot ??
@@ -1022,12 +1034,14 @@ export async function executeActions(params: {
 							"extract_data requires dataExtraction LLM options",
 						);
 					}
-					const selectedDom = extractSimplifiedDomRegion({
-						simplifiedDom: params.simplifiedDom,
-						root: action.root,
-					});
+					const selectedDom = wholeDocument
+						? params.simplifiedDom
+						: extractSimplifiedDomRegion({
+								simplifiedDom: params.simplifiedDom,
+								root: extractionRoot,
+							});
 					dataExtractionCoordinator.launch({
-						root: action.root,
+						root: extractionRoot,
 						run: async (abortSignal) =>
 							await extractor({
 								task: params.userTask ?? "",
@@ -1044,7 +1058,12 @@ export async function executeActions(params: {
 												? params.stepNumber
 												: undefined,
 										currentUrl: params.currentUrl,
-										root: action.root,
+										scope: wholeDocument
+											? "whole_document"
+											: "rooted_subtree",
+										...(!wholeDocument
+											? { root: extractionRoot }
+											: {}),
 									},
 								},
 							}),
@@ -1213,7 +1232,7 @@ export async function executeActions(params: {
 				);
 			} else if (action.type === "extract_data") {
 				interactionErrors.push(
-					`extract_data(root=${action.root}): ${message}`,
+					`extract_data(${configFeatureFlags.extractDataWholeContext ? "scope=whole_document" : `root=${action.root}`}): ${message}`,
 				);
 			}
 		} finally {

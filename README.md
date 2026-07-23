@@ -164,6 +164,22 @@ required. A single terminal result is returned directly. Multiple terminal
 results are returned as a structured list containing each node's task and
 result.
 
+## Checklist and retry verifier
+
+Semantic checklist generation and retry verification are enabled by default. The verifier receives the full validator history and browser-state context, may reject a candidate up to three times, and returns its feedback to the executor so the task can continue. Equivalent explicit settings are:
+
+```yaml
+feature_flags:
+  task_checklist: true
+
+validator_lifecycle:
+  mode: retry
+  max_failures: 3
+  context: full
+```
+
+If `stage_llms.createChecklist` is omitted, it inherits `stage_llms.createPlan`. Checklist generation runs in parallel with plan generation. Set `feature_flags.task_checklist: false` to disable it. Set `validator_lifecycle.mode: terminal` to restore one-shot terminal validation; `context: compact` remains available for ablations.
+
 ## License
 
 Licensed under the [MIT License](./LICENSE.md).
