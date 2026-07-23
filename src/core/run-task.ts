@@ -308,9 +308,7 @@ export function buildTokenUsageArtifactAttempt(params: {
         ? trace.meta.workflowNodeId
         : undefined;
     const workflowNodeKind =
-      trace.meta?.workflowNodeKind === "preparation" ||
-      trace.meta?.workflowNodeKind === "task" ||
-      trace.meta?.workflowNodeKind === "synthesis" ||
+      trace.meta?.workflowNodeKind === "normal" ||
       trace.meta?.workflowNodeKind === "orchestrator"
         ? trace.meta.workflowNodeKind
         : undefined;

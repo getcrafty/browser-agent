@@ -29,13 +29,13 @@ describe("orchestration logging", () => {
             nodes: [
               {
                 id: "node_1",
-                kind: "preparation",
+                kind: "normal",
                 task: "Open the site",
                 dependsOn: [],
               },
               {
                 id: "node_2",
-                kind: "synthesis",
+                kind: "normal",
                 task: "Summarize the result",
                 dependsOn: ["node_1"],
               },
@@ -59,13 +59,13 @@ describe("orchestration logging", () => {
         nodes: [
           {
             id: "node_1",
-            kind: "preparation",
+            kind: "normal",
             task: "Open the site",
             dependsOn: [],
           },
           {
             id: "node_2",
-            kind: "synthesis",
+            kind: "normal",
             task: "Summarize the result",
             dependsOn: ["node_1"],
           },

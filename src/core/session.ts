@@ -158,7 +158,7 @@ export function assertAuthenticationBarrierCleared(
 		(session.authTakeover?.protectedBids.size ?? 0) > 0
 	) {
 		throw new Error(
-			"Workflow authentication preparation is unresolved or still has protected browser state.",
+			"Workflow initial-node authentication is unresolved or still has protected browser state.",
 		);
 	}
 }

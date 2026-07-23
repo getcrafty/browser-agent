@@ -27,7 +27,7 @@ import type {
 export class LateWorkflowAuthenticationError extends Error {
 	constructor() {
 		super(
-			"Authentication was requested after the workflow preparation barrier.",
+			"Authentication was requested after the initial workflow-node barrier.",
 		);
 		this.name = "LateWorkflowAuthenticationError";
 	}

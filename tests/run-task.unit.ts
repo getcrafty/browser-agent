@@ -69,7 +69,7 @@ describe("runTask retry loop", () => {
 					nodes: [
 						{
 							id: "research",
-							kind: "task",
+							kind: "normal",
 							task: "Research",
 							dependsOn: [],
 						},
@@ -78,7 +78,7 @@ describe("runTask retry loop", () => {
 				nodes: [
 					{
 						nodeId: "research",
-						kind: "task",
+						kind: "normal",
 						status: "failed",
 						error: "Workflow node execution failed.",
 						diagnostic: {
@@ -311,7 +311,7 @@ describe("runTask retry loop", () => {
 					step_kind: "executor_step",
 					messages: [],
 					workflow_node_id: "research_a",
-					workflow_node_kind: "task",
+					workflow_node_kind: "normal",
 				},
 				{ step: 2, step_kind: "auth_takeover_attempt", messages: [] },
 				{ step: 3, step_kind: "executor_step", messages: [] },
@@ -357,7 +357,7 @@ describe("runTask retry loop", () => {
 			})),
 			[
 				{ sequence: 1, stage: "findTargetURL", step: undefined, stepKind: undefined, workflowNodeId: undefined, workflowNodeKind: undefined },
-				{ sequence: 2, stage: "runAgent", step: 1, stepKind: "executor_step", workflowNodeId: "research_a", workflowNodeKind: "task" },
+				{ sequence: 2, stage: "runAgent", step: 1, stepKind: "executor_step", workflowNodeId: "research_a", workflowNodeKind: "normal" },
 				{ sequence: 3, stage: "authTakeover", step: 2, stepKind: "auth_takeover_attempt", workflowNodeId: undefined, workflowNodeKind: undefined },
 				{ sequence: 4, stage: "runAgent", step: 3, stepKind: "executor_step", workflowNodeId: undefined, workflowNodeKind: undefined },
 				{ sequence: 5, stage: "dataExtraction", step: 3, stepKind: undefined, workflowNodeId: undefined, workflowNodeKind: undefined },

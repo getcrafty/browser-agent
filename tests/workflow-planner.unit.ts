@@ -47,25 +47,25 @@ function normalizedWorkflow() {
 		nodes: [
 			{
 				id: "node_1",
-				kind: "preparation",
+				kind: "normal",
 				task: "Prepare the shared browser context.",
 				dependsOn: [],
 			},
 			{
 				id: "node_2",
-				kind: "task",
+				kind: "normal",
 				task: "Research the left source.",
 				dependsOn: ["node_1"],
 			},
 			{
 				id: "node_3",
-				kind: "task",
+				kind: "normal",
 				task: "Research the right source.",
 				dependsOn: ["node_1"],
 			},
 			{
 				id: "node_4",
-				kind: "task",
+				kind: "normal",
 				task: "Combine both results.",
 				dependsOn: ["node_2", "node_3"],
 			},
@@ -74,7 +74,7 @@ function normalizedWorkflow() {
 }
 
 describe("workflow planner", () => {
-	it("uses a general preparation example without imposing authentication", () => {
+	it("uses a general shared-context example without imposing authentication", () => {
 		assert.include(
 			WORKFLOW_PLANNER_SYSTEM,
 			"All task descriptions in the workflow shape below are examples only to demonstrate what a valid schema looks like.",
@@ -93,13 +93,18 @@ describe("workflow planner", () => {
 			"Only when the task requires authentication or shared origin setup",
 		);
 		assert.include(WORKFLOW_PLANNER_SYSTEM, "Example 3:");
+		assert.include(WORKFLOW_PLANNER_SYSTEM, "Example 4:");
 		assert.include(
 			WORKFLOW_PLANNER_SYSTEM,
 			"type: normal or type: orchestrator",
 		);
-		assert.include(WORKFLOW_PLANNER_SYSTEM, "Root nodes must be normal");
+		assert.include(WORKFLOW_PLANNER_SYSTEM, "first node must be normal");
 		assert.include(WORKFLOW_PLANNER_SYSTEM, "maximum of 8 nodes");
-		assert.equal(WORKFLOW_PLANNER_SYSTEM.match(/\t- type: normal/g)?.length, 6);
+		assert.equal(WORKFLOW_PLANNER_SYSTEM.match(/\t- type: normal/g)?.length, 7);
+		assert.equal(
+			WORKFLOW_PLANNER_SYSTEM.match(/\t- type: orchestrator/g)?.length,
+			1,
+		);
 	});
 
 	it("accepts a deferred orchestrator after a normal two-node root", () => {
@@ -119,7 +124,7 @@ describe("workflow planner", () => {
 		if (normalized.mode === "workflow") {
 			assert.deepEqual(
 				normalized.nodes.map((node) => node.kind),
-				["preparation", "orchestrator"],
+				["normal", "orchestrator"],
 			);
 		}
 		assert.throws(
@@ -151,8 +156,8 @@ describe("workflow planner", () => {
 				dependsOn: node.dependsOn,
 			})),
 			[
-				{ kind: "task", dependsOn: [] },
-				{ kind: "task", dependsOn: [] },
+				{ kind: "normal", dependsOn: [] },
+				{ kind: "normal", dependsOn: [] },
 			],
 		);
 		assert.throws(
@@ -293,7 +298,7 @@ describe("workflow planner", () => {
 		const withRuntimeFields = validWorkflow();
 		Object.assign(withRuntimeFields.nodes[1], {
 			id: "left",
-			kind: "task",
+			kind: "normal",
 		});
 		assert.throws(
 			() => validateWorkflowDecision(withRuntimeFields),

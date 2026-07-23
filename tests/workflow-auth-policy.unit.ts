@@ -6,7 +6,7 @@ import { assertAuthenticationBarrierCleared } from "../src/core/session.js";
 import type { BrowserSession } from "../src/core/session-registry.js";
 
 describe("workflow authentication policy", () => {
-	it("blocks fan-out while preparation authentication is unresolved", () => {
+	it("blocks fan-out while initial-node authentication is unresolved", () => {
 		assert.throws(
 			() =>
 				assertAuthenticationBarrierCleared({

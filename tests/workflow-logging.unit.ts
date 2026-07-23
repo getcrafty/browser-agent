@@ -24,13 +24,13 @@ describe("workflow planning logging", () => {
           nodes: [
             {
               id: "prepare",
-              kind: "preparation",
+              kind: "normal",
               task: "Authenticate first",
               dependsOn: [],
             },
             {
               id: "research",
-              kind: "task",
+              kind: "normal",
               task: longTask,
               dependsOn: ["prepare"],
             },
@@ -42,7 +42,7 @@ describe("workflow planning logging", () => {
 
     assert.include(block, "Task 2/7 | Run 3/4 | Attempt 2/5");
     assert.include(block, "Workflow decision: DAG with 2 node(s).");
-    assert.include(block, "1. prepare [preparation]");
+    assert.include(block, "1. prepare [normal]");
     assert.include(block, "Depends on: prepare");
     assert.include(block, sanitizeWorkflowLogText(longTask));
     assert.notInclude(block, "\t");
@@ -64,7 +64,7 @@ describe("workflow planning logging", () => {
           nodes: [
             {
               id: "node\u001b]0;owned\u0007",
-              kind: "task",
+              kind: "normal",
               task: "first\u0000 second\r\nthird",
               dependsOn: [],
             },
@@ -124,7 +124,7 @@ describe("workflow planning logging", () => {
     const line = formatWorkflowNodeEventLine({
       status: "failed",
       nodeId: "laureates_phds\nforged-log-line",
-      kind: "task",
+      kind: "normal",
       durationMs: 1234,
       diagnostic: {
         phase: "successor_handoff",

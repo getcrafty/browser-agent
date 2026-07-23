@@ -20,7 +20,7 @@ describe("workflow target scoping e2e", function () {
 		try {
 			root = await launch(undefined, true);
 			const coordinator = new TargetScopeCoordinator(root);
-			await coordinator.createPreparationScope("prepare");
+			await coordinator.createInitialScope("prepare");
 			await coordinator.fanOut("prepare", ["left", "right"]);
 			await coordinator.releaseScope("prepare", { closeTargets: true });
 			left = await coordinator.createScopedBrowser("left");

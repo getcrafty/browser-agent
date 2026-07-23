@@ -23,11 +23,11 @@ const workflowDecision: Extract<WorkflowDecision, { mode: "workflow" }> = {
   mode: "workflow",
   reason: "The branches are independent.",
   nodes: [
-    { id: "prepare", kind: "preparation", task: "Prepare", dependsOn: [] },
-    { id: "research", kind: "task", task: "Research", dependsOn: ["prepare"] },
+    { id: "prepare", kind: "normal", task: "Prepare", dependsOn: [] },
+    { id: "research", kind: "normal", task: "Research", dependsOn: ["prepare"] },
     {
       id: "synthesize",
-      kind: "synthesis",
+      kind: "normal",
       task: "Synthesize",
       dependsOn: ["research"],
     },

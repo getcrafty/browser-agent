@@ -329,10 +329,8 @@ export async function runAgentWithWorkflow(
     rootSessionStarted = true;
     await input.onSessionCreated?.(rootResult);
     const coordinator = new TargetScopeCoordinator(rootResult.session.browser);
-    const preparation = planning.decision.nodes.find(
-      (node) => node.kind === "preparation",
-    ) as WorkflowNode;
-    await coordinator.createPreparationScope(nodeScopeId(preparation.id));
+    const initialNode = planning.decision.nodes[0] as WorkflowNode;
+    await coordinator.createInitialScope(nodeScopeId(initialNode.id));
     const defaults = getDefaultBrowserAgentArtifactDirectories();
     const preparedExpansionRoots = new Set<string>();
 
@@ -393,8 +391,9 @@ export async function runAgentWithWorkflow(
       executeNode: async (node, context) => {
         throwIfAborted(context.signal);
         const scopeId = nodeScopeId(node.id);
+        const isInitialNode = node.id === initialNode.id;
         const expansionRootPrepared = preparedExpansionRoots.delete(node.id);
-        if (node.kind !== "preparation" && !expansionRootPrepared) {
+        if (!isInitialNode && !expansionRootPrepared) {
           const incomingScopes = node.dependsOn.map((dependency) =>
             edgeScopeId(dependency, node.id),
           );
@@ -424,7 +423,7 @@ export async function runAgentWithWorkflow(
         );
         const sessionInput = {
           ...input.session,
-          url: node.kind === "preparation" ? input.session.url : undefined,
+          url: isInitialNode ? input.session.url : undefined,
           forceRestart: false,
         };
         const session = await runNodePhase("agent_execution", () =>
@@ -437,27 +436,23 @@ export async function runAgentWithWorkflow(
           task: buildWorkflowNodeTask(node, context.dependencies),
           stageLLMs: input.stageLLMs,
           featureFlags: input.featureFlags,
-          authenticationPolicy:
-            node.kind === "preparation" ? "allow" : "reject",
+          authenticationPolicy: isInitialNode ? "allow" : "reject",
           autoSwitchToNewTab: input.autoSwitchToNewTab,
-          requestAuthDomainCandidates:
-            node.kind === "preparation"
-              ? input.requestAuthDomainCandidates
-              : undefined,
-          requestAuthIdentifierForDomain:
-            node.kind === "preparation"
-              ? input.requestAuthIdentifierForDomain
-              : undefined,
-          requestAuthPasswordForDomain:
-            node.kind === "preparation"
-              ? input.requestAuthPasswordForDomain
-              : undefined,
-          userActionBehavior:
-            node.kind === "preparation" ? input.userActionBehavior : "return",
-          onUserActionRequired:
-            node.kind === "preparation"
-              ? input.onUserActionRequired
-              : undefined,
+          requestAuthDomainCandidates: isInitialNode
+            ? input.requestAuthDomainCandidates
+            : undefined,
+          requestAuthIdentifierForDomain: isInitialNode
+            ? input.requestAuthIdentifierForDomain
+            : undefined,
+          requestAuthPasswordForDomain: isInitialNode
+            ? input.requestAuthPasswordForDomain
+            : undefined,
+          userActionBehavior: isInitialNode
+            ? input.userActionBehavior
+            : "return",
+          onUserActionRequired: isInitialNode
+            ? input.onUserActionRequired
+            : undefined,
           requestAgentTakeover: input.requestAgentTakeover,
           recordModelInvocation: input.recordModelInvocation
             ? (trace) =>
@@ -504,7 +499,7 @@ export async function runAgentWithWorkflow(
                 : "node_incomplete",
           });
         }
-        if (node.kind === "preparation") {
+        if (isInitialNode) {
           await runNodePhase("authentication_barrier", () =>
             assertAuthenticationBarrierCleared(session),
           );
@@ -561,9 +556,9 @@ export async function runAgentWithWorkflow(
     const orderedRunResults = resolvedNodes
       .map((node) => runResults.get(node.id))
       .filter((result): result is RunAgentResult => Boolean(result));
-    const preparationResult = runResults.get(preparation.id);
-    if (!preparationResult) {
-      throw new Error("Workflow preparation did not produce a result.");
+    const initialNodeResult = runResults.get(initialNode.id);
+    if (!initialNodeResult) {
+      throw new Error("Workflow initial node did not produce a result.");
     }
     const singleTerminalResult =
       workflow.terminalNodeIds.length === 1
@@ -571,7 +566,7 @@ export async function runAgentWithWorkflow(
         : undefined;
     const flattened = flattenNodeResults(resolvedNodes, runResults);
     return {
-      preprocess: preparationResult.preprocess,
+      preprocess: initialNodeResult.preprocess,
       completed: workflow.completed,
       successful: workflow.successful,
       result: workflow.result,

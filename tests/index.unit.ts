@@ -624,7 +624,7 @@ describe("index main", () => {
         nodes: [
           {
             id: "prepare",
-            kind: "preparation" as const,
+            kind: "normal" as const,
             task: "Authenticate first",
             dependsOn: [],
           },

@@ -122,7 +122,7 @@ export class TargetScopeCoordinator {
     return this.access(scopeId);
   }
 
-  async createPreparationScope(scopeId: string): Promise<BrowserTargetScope> {
+  async createInitialScope(scopeId: string): Promise<BrowserTargetScope> {
     const targets = await this.backend.listTargets();
     const scope = this.createScope(
       scopeId,

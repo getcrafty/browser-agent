@@ -3,7 +3,6 @@ import type {
   WorkflowDecision,
   WorkflowNode,
   WorkflowNodeDiagnostic,
-  WorkflowNodeKind,
   WorkflowNodeResult,
   WorkflowResult,
 } from "./workflow-types.js";
@@ -26,7 +25,7 @@ export interface WorkflowNodeExecutionOutput {
 }
 
 export type WorkflowAgentNode = Omit<WorkflowNode, "kind"> & {
-  kind: Exclude<WorkflowNodeKind, "orchestrator">;
+  kind: "normal";
 };
 
 export type WorkflowOrchestratorNode = Omit<WorkflowNode, "kind"> & {
@@ -279,7 +278,7 @@ function graftWorkflowExpansion(
   const existingIds = new Set(nodes.map((node) => node.id));
   const idMap = new Map<string, string>();
   for (const [index, node] of expansion.nodes.entries()) {
-    if (node.kind !== "task") {
+    if (node.kind !== "normal") {
       throw new WorkflowNodeExecutionError({
         phase: "orchestration_expansion",
         code: "planning_failed",
@@ -322,7 +321,7 @@ function graftWorkflowExpansion(
     return {
       ...node,
       id: idMap.get(node.id) as string,
-      kind: "task" as const,
+      kind: "normal" as const,
       dependsOn:
         dependencies.length === 0 ? [...orchestrator.dependsOn] : dependencies,
     };

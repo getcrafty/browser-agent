@@ -1,5 +1,4 @@
-export type WorkflowNodeKind =
-  "preparation" | "task" | "synthesis" | "orchestrator";
+export type WorkflowNodeKind = "normal" | "orchestrator";
 
 export interface WorkflowNode {
   id: string;

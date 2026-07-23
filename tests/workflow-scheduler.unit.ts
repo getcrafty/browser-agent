@@ -14,12 +14,12 @@ const decision: Extract<WorkflowDecision, { mode: "workflow" }> = {
   mode: "workflow",
   reason: "Parallel work",
   nodes: [
-    { id: "prepare", kind: "preparation", task: "Prepare", dependsOn: [] },
-    { id: "left", kind: "task", task: "Left", dependsOn: ["prepare"] },
-    { id: "right", kind: "task", task: "Right", dependsOn: ["prepare"] },
+    { id: "prepare", kind: "normal", task: "Prepare", dependsOn: [] },
+    { id: "left", kind: "normal", task: "Left", dependsOn: ["prepare"] },
+    { id: "right", kind: "normal", task: "Right", dependsOn: ["prepare"] },
     {
       id: "synthesize",
-      kind: "synthesis",
+      kind: "normal",
       task: "Synthesize",
       dependsOn: ["left", "right"],
     },
@@ -41,10 +41,13 @@ describe("workflow scheduler", () => {
         active += 1;
         peak = Math.max(peak, active);
         await new Promise((resolve) =>
-          setTimeout(resolve, node.kind === "task" ? 5 : 0),
+          setTimeout(
+            resolve,
+            node.id === "left" || node.id === "right" ? 5 : 0,
+          ),
         );
         active -= 1;
-        if (node.kind === "synthesis") {
+        if (node.id === "synthesize") {
           assert.deepEqual(
             context.dependencies.map((entry) => entry.result),
             ["prepare-result", "left-result", "right-result"],
@@ -79,19 +82,19 @@ describe("workflow scheduler", () => {
         nodes: [
           {
             id: "prepare",
-            kind: "preparation",
+            kind: "normal",
             task: "Prepare",
             dependsOn: [],
           },
           {
             id: "left",
-            kind: "task",
+            kind: "normal",
             task: "Research left",
             dependsOn: ["prepare"],
           },
           {
             id: "right",
-            kind: "task",
+            kind: "normal",
             task: "Research right",
             dependsOn: ["prepare"],
           },
@@ -120,7 +123,7 @@ describe("workflow scheduler", () => {
         nodes: [
           {
             id: "node_1",
-            kind: "preparation",
+            kind: "normal",
             task: "Discover",
             dependsOn: [],
           },
@@ -132,7 +135,7 @@ describe("workflow scheduler", () => {
           },
           {
             id: "node_3",
-            kind: "task",
+            kind: "normal",
             task: "Use every detail",
             dependsOn: ["node_2"],
           },
@@ -149,8 +152,8 @@ describe("workflow scheduler", () => {
         return {
           reason: "Two records",
           nodes: [
-            { id: "node_1", kind: "task", task: "Fetch A", dependsOn: [] },
-            { id: "node_2", kind: "task", task: "Fetch B", dependsOn: [] },
+            { id: "node_1", kind: "normal", task: "Fetch A", dependsOn: [] },
+            { id: "node_2", kind: "normal", task: "Fetch B", dependsOn: [] },
           ],
         };
       },
@@ -210,13 +213,13 @@ describe("workflow scheduler", () => {
         nodes: [
           {
             id: "prepare",
-            kind: "preparation",
+            kind: "normal",
             task: "Prepare",
             dependsOn: [],
           },
           {
             id: "discover",
-            kind: "task",
+            kind: "normal",
             task: "Discover",
             dependsOn: ["prepare"],
           },
@@ -243,7 +246,7 @@ describe("workflow scheduler", () => {
         return {
           reason: node.id,
           nodes: [
-            { id: "node_1", kind: "task", task: node.task, dependsOn: [] },
+            { id: "node_1", kind: "normal", task: node.task, dependsOn: [] },
           ],
         };
       },
@@ -262,14 +265,14 @@ describe("workflow scheduler", () => {
         mode: "workflow",
         reason: "Deferred work",
         nodes: [
-          { id: "node_1", kind: "preparation", task: "One", dependsOn: [] },
+          { id: "node_1", kind: "normal", task: "One", dependsOn: [] },
           {
             id: "node_2",
             kind: "orchestrator",
             task: "Expand",
             dependsOn: ["node_1"],
           },
-          { id: "node_3", kind: "task", task: "After", dependsOn: ["node_2"] },
+          { id: "node_3", kind: "normal", task: "After", dependsOn: ["node_2"] },
         ],
       },
       maxParallelNodes: 1,
@@ -300,22 +303,22 @@ describe("workflow scheduler", () => {
         mode: "workflow",
         reason: "Branch with one deeper child",
         nodes: [
-          { id: "node_1", kind: "preparation", task: "One", dependsOn: [] },
+          { id: "node_1", kind: "normal", task: "One", dependsOn: [] },
           {
             id: "node_2a",
-            kind: "task",
+            kind: "normal",
             task: "Two A",
             dependsOn: ["node_1"],
           },
           {
             id: "node_2b",
-            kind: "task",
+            kind: "normal",
             task: "Two B",
             dependsOn: ["node_1"],
           },
           {
             id: "node_3",
-            kind: "synthesis",
+            kind: "normal",
             task: "Three",
             dependsOn: ["node_2a"],
           },
@@ -412,7 +415,7 @@ describe("workflow scheduler", () => {
       decision: {
         mode: "workflow",
         reason: "One node",
-        nodes: [{ id: "only", kind: "task", task: "Fail", dependsOn: [] }],
+        nodes: [{ id: "only", kind: "normal", task: "Fail", dependsOn: [] }],
       },
       maxParallelNodes: 1,
       executeNode: async () => {
@@ -433,7 +436,7 @@ describe("workflow scheduler", () => {
       decision: {
         mode: "workflow",
         reason: "One node",
-        nodes: [{ id: "only", kind: "task", task: "Fail", dependsOn: [] }],
+        nodes: [{ id: "only", kind: "normal", task: "Fail", dependsOn: [] }],
       },
       maxParallelNodes: 1,
       executeNode: async () => {

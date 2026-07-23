@@ -53,11 +53,22 @@ Example 3:
 		task: Complete another independent bounded subtask and return a concrete result.
 		dependsOn: [1]
 
+Example 4:
+	mode: workflow
+	reason: The required browser tasks depend on items discovered at runtime.
+	nodes:
+	- type: normal
+		task: Find and return the profile URLs listed on the conference speakers page.
+		dependsOn: []
+	- type: orchestrator
+		task: Using the discovered URLs, create one normal browser task per profile to return the speaker's role and organization.
+		dependsOn: [1]
+
 - Choose direct for simple tasks, including tasks that are naturally handled in one short browser trajectory. 
 - Choose workflow only when the task has meaningful independent work, useful parallelism, or multiple ordered substeps that justify orchestration overhead.
 - A workflow should contain a maximum of 8 nodes
 - Each node may use type: normal or type: orchestrator. Omitted type defaults to normal.
-- Root nodes must be normal. An orchestrator node waits for its dependencies, then recalls orchestration using their completed results instead of doing browser work.
+- The first node must be normal and must be the only root. An orchestrator node waits for its dependencies, then recalls orchestration using their completed results instead of doing browser work.
 - If using workflow mode, do not attempt to solve any parts of the task when rewording the task into subtasks. For example, you should not include any part of answers in node task, unless it is present in the original task.
 - Dependencies must refer only to earlier nodes. 
 - Normal nodes are browser agents, so each normal task should be well suited for a browser agent
@@ -190,12 +201,7 @@ function parseWorkflowNode(
 	const id = workflowNodeId(index);
 	return {
 		id,
-		kind:
-			mode === "initial" && index === 0
-				? "preparation"
-				: type === "orchestrator"
-					? "orchestrator"
-					: "task",
+		kind: type,
 		task: asNonEmptyString(source.task, `Workflow node '${id}' task`),
 		dependsOn: parseDependsOn(
 			source.dependsOn ?? source.depends_on,
@@ -317,23 +323,18 @@ function validateWorkflowShape(
 		return { mode: "workflow", reason, nodes };
 	}
 
-	const preparations = nodes.filter((node) => node.kind === "preparation");
-	if (preparations.length !== 1 || preparations[0].dependsOn.length !== 0) {
+	const initialNode = nodes[0];
+	if (roots.length !== 1 || roots[0].id !== initialNode.id) {
 		throw new WorkflowDecisionValidationError(
-			"Workflow must have exactly one preparation root.",
-		);
-	}
-	if (roots.length !== 1 || roots[0].id !== preparations[0].id) {
-		throw new WorkflowDecisionValidationError(
-			"Workflow preparation must be the only root.",
+			"Workflow initial normal node must be the only root.",
 		);
 	}
 
 	const dependents = buildDependents(nodes);
-	const fromPreparation = collectReachable(preparations[0].id, dependents);
-	if (fromPreparation.size !== nodes.length) {
+	const fromInitialNode = collectReachable(initialNode.id, dependents);
+	if (fromInitialNode.size !== nodes.length) {
 		throw new WorkflowDecisionValidationError(
-			"Every workflow node must descend from preparation.",
+			"Every workflow node must descend from the initial normal node.",
 		);
 	}
 	return { mode: "workflow", reason, nodes };

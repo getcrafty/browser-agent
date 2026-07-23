@@ -144,9 +144,9 @@ stage_llms:
 ```
 
 The workflow planner defaults to the configured `create_plan` model when no
-dedicated override is supplied. When authentication preparation is required,
-it runs before parallel branches; `max_steps` applies independently to each
-DAG node.
+dedicated override is supplied. When authentication setup is required, it runs
+in the first normal node before parallel branches; `max_steps` applies
+independently to each DAG node.
 
 For each workflow attempt, one self-contained validated DAG file is written
 directly under `orchestration_logs` next to the configured
@@ -159,8 +159,8 @@ in the DAG. These parent results include the ancestor's task so downstream
 nodes can interpret each result. Scheduling and browser-tab handoffs continue
 to use direct edges.
 
-Workflows may have one or more terminal task nodes; no synthesis node is
-required. A single terminal result is returned directly. Multiple terminal
+Workflows may have one or more terminal normal nodes; no dedicated final node
+is required. A single terminal result is returned directly. Multiple terminal
 results are returned as a structured list containing each node's task and
 result.
 
